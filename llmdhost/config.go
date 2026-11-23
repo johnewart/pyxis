@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/johnewart/pyxis/cursorws"
+	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	"github.com/johnewart/pyxis/internal/tracing"
 	"github.com/johnewart/pyxis/lexstore"
 	"github.com/johnewart/pyxis/llmdtools"
@@ -110,6 +111,15 @@ type Config struct {
 	// per tenant at runtime and are rejected if their name is already in the
 	// host's tool registry (which includes every tool installed here).
 	Tools []llmdtools.RegisterFunc
+
+	// AgentProfiles are the host's code-defined agent profiles (a plugin's
+	// assistants, say). They join llmd's static tier: read-only through the
+	// profile RPCs, the same in every workspace, and always what the host's
+	// current build defines, so changing them in code changes them
+	// everywhere on the next start. created_at, updated_at and is_static are
+	// ignored. New fails on an invalid profile or a duplicate id. Users adjust
+	// a static profile per workspace with an overlay, never by editing it.
+	AgentProfiles []*llmv1.AgentProfile
 
 	// ToolProviderSecret is the shared secret every ToolProviderService.Connect
 	// stream must present (executors in metadata key

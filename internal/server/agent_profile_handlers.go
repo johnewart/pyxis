@@ -12,7 +12,6 @@ import (
 	"github.com/johnewart/pyxis/llmdlog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
@@ -139,35 +138,7 @@ func (s *LlmServer) agentProfileWriteScope(ctx context.Context, op, id string) (
 // rejects a value this build does not know rather than defaulting it to the
 // permissive INHERIT_SERVER_WIDE.
 func profileFromAgentProfileFields(id, name, description string, sections []*llmv1.SystemPromptSection, providerID, model *string, memoryEnabled bool, mapping []*llmv1.ToolMapping, policy llmv1.ToolPolicy) *agentprofile.Profile {
-	p := &agentprofile.Profile{
-		ID:            strings.TrimSpace(id),
-		Name:          strings.TrimSpace(name),
-		Description:   strings.TrimSpace(description),
-		MemoryEnabled: memoryEnabled,
-		ToolPolicy:    policy,
-	}
-	if providerID != nil {
-		p.LlmProviderID = strings.TrimSpace(*providerID)
-	}
-	if model != nil {
-		p.DefaultModel = strings.TrimSpace(*model)
-	}
-	for _, sec := range sections {
-		if sec == nil {
-			continue
-		}
-		p.SystemPromptSections = append(p.SystemPromptSections, proto.Clone(sec).(*llmv1.SystemPromptSection))
-	}
-	for _, m := range mapping {
-		if m == nil {
-			continue
-		}
-		p.ToolMapping = append(p.ToolMapping, agentprofile.ToolMapping{
-			ToolName: strings.TrimSpace(m.GetToolName()),
-			Enabled:  m.GetEnabled(),
-		})
-	}
-	return p
+	return agentprofile.FromFields(id, name, description, sections, providerID, model, memoryEnabled, mapping, policy)
 }
 
 // validateToolMappingNames rejects the first mapping whose tool is not in

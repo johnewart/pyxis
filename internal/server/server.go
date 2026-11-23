@@ -139,6 +139,11 @@ type LlmServer struct {
 	// fail closed with FailedPrecondition. When AgentProfiles is not injected,
 	// the lazy agentProfiles accessor builds the resolver over this repo.
 	AgentProfileRepo *store.AgentProfileRepo
+	// AgentProfileOverlays stores each workspace's overlays on static
+	// profiles (llmd_agent_profile_overlays). Optional: nil serves static
+	// profiles as defined and the overlay RPCs fail with FailedPrecondition.
+	// When AgentProfiles is not injected, the lazy accessor wires it in.
+	AgentProfileOverlays *store.AgentProfileOverlayRepo
 	// DecorationsRepo persists typed turn/tool-result decorations
 	// (llmd_turn_decorations; optional; nil disables it).
 	DecorationsRepo *store.TurnDecorationRepo
@@ -2992,6 +2997,9 @@ func (s *LlmServer) agentProfiles() *agentprofile.Resolver {
 				dyn = s.AgentProfileRepo
 			}
 			s.AgentProfiles = agentprofile.NewResolver(agentprofile.Default, dyn)
+			if s.AgentProfileOverlays != nil {
+				s.AgentProfiles.Overlays = s.AgentProfileOverlays
+			}
 		}
 	})
 	return s.AgentProfiles

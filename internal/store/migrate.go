@@ -36,6 +36,7 @@ var CoreModels = []any{
 	&SessionDraftRow{},
 	&SessionQueuedMessageRow{},
 	&AgentProfileRow{},
+	&AgentProfileOverlayRow{},
 	&UsageRecordRow{},
 	&ToolUsageRow{},
 }

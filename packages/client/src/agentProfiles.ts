@@ -21,9 +21,15 @@ import {
   type SystemPromptSectionWire,
 } from "./systemPromptSectionsWire.js";
 import { grpcSafeString } from "./utf8.js";
-import { ToolPolicy, type AgentProfile, type ToolMapping } from "./gen/llmv1/llm_pb.js";
+import {
+  AgentProfileOverlayField,
+  ToolPolicy,
+  type AgentProfile,
+  type AgentProfileOverlay,
+  type ToolMapping,
+} from "./gen/llmv1/llm_pb.js";
 
-export { ToolPolicy };
+export { AgentProfileOverlayField, ToolPolicy };
 
 type BaseOpts = LlmdCallTarget & {
   /** Tenant id — carried as the `llmd-tenant-id` header. */
@@ -64,6 +70,11 @@ export type LlmdAgentProfile = {
   updatedAt: string;
   /** Static profiles are defined in code and are read-only. */
   isStatic: boolean;
+  /**
+   * The fields the workspace's overlay changed (static profiles only); empty
+   * when the profile is exactly its code definition.
+   */
+  customized: AgentProfileOverlayField[];
 };
 
 /** Map a generated llm.v1.AgentProfile message onto the SDK-facing shape. */
@@ -85,6 +96,7 @@ export function agentProfileFromProto(p: AgentProfile): LlmdAgentProfile {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     isStatic: p.isStatic === true,
+    customized: [...(p.customized ?? [])],
   };
 }
 
@@ -247,6 +259,120 @@ export async function deleteLlmdAgentProfile(
     undefined,
     { label: "deleteAgentProfile" }
   );
+}
+
+/**
+ * A workspace's changes to one static profile (matches
+ * llm.v1.AgentProfileOverlay). Unset optionals keep the base's value.
+ */
+export type LlmdAgentProfileOverlay = {
+  baseId: string;
+  llmProviderId?: string;
+  defaultModel?: string;
+  memoryEnabled?: boolean;
+  /** Each entry sets that tool on or off; tools not named keep the base's setting. */
+  toolOverrides: LlmdAgentProfileToolMapping[];
+  /** Replace the content of the base section with the same id. */
+  sectionReplacements: SystemPromptSectionWire[];
+  /** Appended after the base's sections; ids must not match a base section. */
+  extraSections: SystemPromptSectionWire[];
+  /** RFC3339; empty when nothing is stored. */
+  updatedAt: string;
+};
+
+function sectionsFromProto(
+  sections: AgentProfileOverlay["extraSections"] | undefined
+): SystemPromptSectionWire[] {
+  return (sections ?? []).map((s) => ({ id: s.id, content: s.content, tags: [...(s.tags ?? [])] }));
+}
+
+/** Map a generated llm.v1.AgentProfileOverlay onto the SDK-facing shape. */
+export function agentProfileOverlayFromProto(o: AgentProfileOverlay): LlmdAgentProfileOverlay {
+  return {
+    baseId: o.baseId,
+    llmProviderId: o.llmProviderId,
+    defaultModel: o.defaultModel,
+    memoryEnabled: o.memoryEnabled,
+    toolOverrides: (o.toolOverrides ?? []).map(toolMappingFromProto),
+    sectionReplacements: sectionsFromProto(o.sectionReplacements),
+    extraSections: sectionsFromProto(o.extraSections),
+    updatedAt: o.updatedAt,
+  };
+}
+
+/**
+ * Read the workspace's overlay on a static profile, plus the base (the code
+ * definition without the overlay). The overlay is empty when none is stored.
+ * Rejects NotFound when profileId is not a static profile.
+ */
+export async function getLlmdAgentProfileOverlay(
+  opts: BaseOpts & { profileId: string }
+): Promise<{ overlay: LlmdAgentProfileOverlay; base: LlmdAgentProfile }> {
+  const client = resolveLlmServiceClient(opts);
+  const res = await callUnary(
+    (o) => client.getAgentProfileOverlay({ baseId: grpcSafeString(opts.profileId.trim()) }, o),
+    scopeHeaders(opts),
+    undefined,
+    { label: "getAgentProfileOverlay" }
+  );
+  if (!res.overlay || !res.base) {
+    throw new Error(`getAgentProfileOverlay: incomplete response for id ${opts.profileId}`);
+  }
+  return { overlay: agentProfileOverlayFromProto(res.overlay), base: agentProfileFromProto(res.base) };
+}
+
+/**
+ * Replace the workspace's overlay on a static profile wholesale. Returns the
+ * stored overlay and the merged profile.
+ */
+export async function setLlmdAgentProfileOverlay(
+  opts: BaseOpts & { overlay: Omit<LlmdAgentProfileOverlay, "updatedAt"> }
+): Promise<{ overlay: LlmdAgentProfileOverlay; profile: LlmdAgentProfile }> {
+  const client = resolveLlmServiceClient(opts);
+  const ov = opts.overlay;
+  const res = await callUnary(
+    (o) =>
+      client.setAgentProfileOverlay(
+        {
+          overlay: {
+            baseId: grpcSafeString(ov.baseId.trim()),
+            ...(ov.llmProviderId !== undefined ? { llmProviderId: grpcSafeString(ov.llmProviderId) } : {}),
+            ...(ov.defaultModel !== undefined ? { defaultModel: grpcSafeString(ov.defaultModel) } : {}),
+            ...(ov.memoryEnabled !== undefined ? { memoryEnabled: ov.memoryEnabled === true } : {}),
+            toolOverrides: toolMappingToProto(ov.toolOverrides),
+            sectionReplacements: ov.sectionReplacements.length
+              ? systemPromptSectionsToProto(ov.sectionReplacements)
+              : [],
+            extraSections: ov.extraSections.length ? systemPromptSectionsToProto(ov.extraSections) : [],
+          },
+        },
+        o
+      ),
+    scopeHeaders(opts),
+    undefined,
+    { label: "setAgentProfileOverlay" }
+  );
+  if (!res.overlay || !res.profile) {
+    throw new Error(`setAgentProfileOverlay: incomplete response for id ${ov.baseId}`);
+  }
+  return { overlay: agentProfileOverlayFromProto(res.overlay), profile: agentProfileFromProto(res.profile) };
+}
+
+/** Remove the workspace's overlay, returning the static profile to its code definition. */
+export async function resetLlmdAgentProfileOverlay(
+  opts: BaseOpts & { profileId: string }
+): Promise<LlmdAgentProfile> {
+  const client = resolveLlmServiceClient(opts);
+  const res = await callUnary(
+    (o) => client.resetAgentProfileOverlay({ baseId: grpcSafeString(opts.profileId.trim()) }, o),
+    scopeHeaders(opts),
+    undefined,
+    { label: "resetAgentProfileOverlay" }
+  );
+  if (!res.profile) {
+    throw new Error(`resetAgentProfileOverlay: server returned no profile for id ${opts.profileId}`);
+  }
+  return agentProfileFromProto(res.profile);
 }
 
 export type CreateLlmdSessionFromAgentProfileOptions = BaseOpts & {

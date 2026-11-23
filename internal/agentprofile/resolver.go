@@ -3,8 +3,10 @@ package agentprofile
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
+	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	"github.com/johnewart/pyxis/internal/serverutil"
 )
 
@@ -28,9 +30,41 @@ type DynamicStore interface {
 // static-first precedence: a static id shadows a dynamic profile of the same
 // id. Dynamic is consulted only when it is wired and the scope has a tenant;
 // without one, only the static tier answers.
+//
+// When Overlays is set, a static profile is returned with the scope's overlay
+// applied (ApplyOverlay); Base returns it without.
 type Resolver struct {
-	Static  *Registry
-	Dynamic DynamicStore
+	Static   *Registry
+	Dynamic  DynamicStore
+	Overlays OverlayStore
+}
+
+func (r *Resolver) useOverlays(sc serverutil.Scope) bool {
+	return r != nil && r.Overlays != nil && strings.TrimSpace(sc.TenantID) != ""
+}
+
+// overlaid applies the scope's overlay to the static profile p.
+func (r *Resolver) overlaid(ctx context.Context, sc serverutil.Scope, p *Profile) (*Profile, error) {
+	if !r.useOverlays(sc) {
+		return p, nil
+	}
+	ov, err := r.Overlays.Get(ctx, sc, p.ID)
+	if err != nil {
+		return nil, fmt.Errorf("agent profile %q in %s: overlay: %w", p.ID, sc, err)
+	}
+	return ApplyOverlay(p, ov)
+}
+
+// Base returns the static profile id without any overlay, or ErrNotStatic.
+func (r *Resolver) Base(id string) (*Profile, error) {
+	if r == nil {
+		return nil, ErrNotStatic
+	}
+	p, ok := r.Static.Get(strings.TrimSpace(id))
+	if !ok {
+		return nil, fmt.Errorf("%q: %w", id, ErrNotStatic)
+	}
+	return p, nil
 }
 
 // NewResolver builds a resolver; a nil static registry falls back to Default.
@@ -53,7 +87,7 @@ func (r *Resolver) Get(ctx context.Context, sc serverutil.Scope, id string) (*Pr
 	}
 	id = strings.TrimSpace(id)
 	if p, ok := r.Static.Get(id); ok {
-		return p, nil
+		return r.overlaid(ctx, sc, p)
 	}
 	if !r.useDynamic(sc) {
 		return nil, ErrNotFound
@@ -77,6 +111,29 @@ func (r *Resolver) List(ctx context.Context, sc serverutil.Scope) ([]*Profile, e
 		return nil, nil
 	}
 	out := r.Static.List()
+	if r.useOverlays(sc) {
+		ovs, err := r.Overlays.List(ctx, sc)
+		if err != nil {
+			return nil, fmt.Errorf("agent profile overlays in %s: %w", sc, err)
+		}
+		byID := make(map[string]*llmv1.AgentProfileOverlay, len(ovs))
+		for _, ov := range ovs {
+			if ov != nil {
+				byID[ov.GetBaseId()] = ov
+			}
+		}
+		for i, p := range out {
+			ov, ok := byID[p.ID]
+			if !ok {
+				continue
+			}
+			m, err := ApplyOverlay(p, ov)
+			if err != nil {
+				return nil, fmt.Errorf("agent profile %q in %s: %w", p.ID, sc, err)
+			}
+			out[i] = m
+		}
+	}
 	if !r.useDynamic(sc) {
 		return out, nil
 	}

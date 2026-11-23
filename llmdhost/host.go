@@ -19,6 +19,7 @@ import (
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	mcpproxyv1 "github.com/johnewart/pyxis/gen/mcpproxy/v1"
 	"github.com/johnewart/pyxis/grpcutf8"
+	"github.com/johnewart/pyxis/internal/agentprofile"
 	"github.com/johnewart/pyxis/internal/assistant/history"
 	"github.com/johnewart/pyxis/internal/assistant/session"
 	knowledgestore "github.com/johnewart/pyxis/internal/knowledge/store"
@@ -308,6 +309,18 @@ func New(cfg Config) (*Host, error) {
 	// the MCP handler, so dedup state and sidecar writes stay consistent.
 	h.sessions = toolsession.New(sidecarRepo, h.sessionRepo, decorationRepo)
 
+	staticProfiles, err := staticProfileRegistry(cfg.AgentProfiles)
+	if err != nil {
+		h.closeDatabases()
+		return nil, fmt.Errorf("agent profiles: %w", err)
+	}
+	dynamicProfiles := store.NewAgentProfileRepo(db)
+	profileOverlays := store.NewAgentProfileOverlayRepo(db)
+	profileResolver := agentprofile.NewResolver(staticProfiles, dynamicProfiles)
+	if profileOverlays != nil {
+		profileResolver.Overlays = profileOverlays
+	}
+
 	h.llm = &server.LlmServer{
 		Providers:           composite,
 		Tools:               toolregistry.New(),
@@ -322,7 +335,9 @@ func New(cfg Config) (*Host, error) {
 		ToolResultSidecar:   sidecarRepo,
 		Attachments:         attachmentRepo,
 		SessionRepo:         h.sessionRepo,
-		AgentProfileRepo:    store.NewAgentProfileRepo(db),
+		AgentProfileRepo:    dynamicProfiles,
+		AgentProfileOverlays: profileOverlays,
+		AgentProfiles:       profileResolver,
 		DecorationsRepo:     decorationRepo,
 		TrackedDocs:         store.NewTrackedDocumentRepo(db),
 		SessionCache:        h.sessionCacheRepo,

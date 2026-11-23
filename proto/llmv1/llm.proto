@@ -600,6 +600,80 @@ message AgentProfile {
   // tool_mapping an allowlist: only the enabled entries (plus core tools) reach
   // the session, so a tool registered server-wide later cannot leak in.
   ToolPolicy tool_policy = 12;
+  // The fields of this profile that come from the workspace's overlay, not
+  // from its static base. Empty for dynamic profiles and for a static profile
+  // with no overlay.
+  repeated AgentProfileOverlayField customized = 13;
+}
+
+// A field of a static profile that an overlay can change.
+enum AgentProfileOverlayField {
+  AGENT_PROFILE_OVERLAY_FIELD_UNSPECIFIED = 0;
+  AGENT_PROFILE_OVERLAY_FIELD_LLM_PROVIDER = 1;
+  AGENT_PROFILE_OVERLAY_FIELD_DEFAULT_MODEL = 2;
+  AGENT_PROFILE_OVERLAY_FIELD_MEMORY_ENABLED = 3;
+  AGENT_PROFILE_OVERLAY_FIELD_TOOLS = 4;
+  AGENT_PROFILE_OVERLAY_FIELD_SYSTEM_PROMPT = 5;
+}
+
+// A workspace's changes to one static (code-defined) profile. The base stays
+// read-only and is always the host's current definition; the overlay is
+// applied on top of it whenever the profile is resolved, so an upgrade of the
+// base never conflicts with the user's changes.
+//
+// Merge rules:
+// - llm_provider_id, default_model, memory_enabled: replace the base value
+//   when set.
+// - tool_overrides: each entry sets that tool's enabled flag, adding a
+//   mapping when the base has none. Tools the base adds later and the overlay
+//   does not name keep the base's setting.
+// - section_replacements: replace the content of the base section with the
+//   same id. An id the base no longer has is ignored.
+// - extra_sections: appended after the base's sections. Their ids must not
+//   collide with a base section id.
+message AgentProfileOverlay {
+  string base_id = 1;
+  optional string llm_provider_id = 2;
+  optional string default_model = 3;
+  optional bool memory_enabled = 4;
+  repeated ToolMapping tool_overrides = 5;
+  repeated SystemPromptSection section_replacements = 6;
+  repeated SystemPromptSection extra_sections = 7;
+  // RFC3339; empty when no overlay is stored.
+  string updated_at = 8;
+}
+
+message GetAgentProfileOverlayRequest {
+  string base_id = 1;
+}
+
+// overlay is empty (only base_id set) when the workspace has none. base is
+// the static profile without the overlay, so a UI can show what it changes.
+message GetAgentProfileOverlayResponse {
+  AgentProfileOverlay overlay = 1;
+  AgentProfile base = 2;
+}
+
+// Replaces the workspace's overlay for base_id wholesale. Fails NotFound when
+// base_id is not a static profile and InvalidArgument when the merged
+// profile would not validate.
+message SetAgentProfileOverlayRequest {
+  AgentProfileOverlay overlay = 1;
+}
+
+// profile is the merged result.
+message SetAgentProfileOverlayResponse {
+  AgentProfileOverlay overlay = 1;
+  AgentProfile profile = 2;
+}
+
+// Removes the workspace's overlay, returning the profile to its base.
+message ResetAgentProfileOverlayRequest {
+  string base_id = 1;
+}
+
+message ResetAgentProfileOverlayResponse {
+  AgentProfile profile = 1;
 }
 
 message CreateAgentProfileRequest {
@@ -2846,6 +2920,11 @@ service LlmService {
   rpc DeleteAgentProfile(DeleteAgentProfileRequest) returns (DeleteAgentProfileResponse);
   rpc GetAgentProfile(GetAgentProfileRequest) returns (GetAgentProfileResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  // Per-workspace overlays on static profiles. Get and List already return
+  // the merged profile; these read and change the overlay itself.
+  rpc GetAgentProfileOverlay(GetAgentProfileOverlayRequest) returns (GetAgentProfileOverlayResponse);
+  rpc SetAgentProfileOverlay(SetAgentProfileOverlayRequest) returns (SetAgentProfileOverlayResponse);
+  rpc ResetAgentProfileOverlay(ResetAgentProfileOverlayRequest) returns (ResetAgentProfileOverlayResponse);
   // Creates a session from a profile; composes EnsureSession from the profile's
   // fields plus the request's overrides.
   rpc CreateSessionFromAgentProfile(CreateSessionFromAgentProfileRequest) returns (CreateSessionFromAgentProfileResponse);

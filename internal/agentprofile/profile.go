@@ -94,6 +94,10 @@ type Profile struct {
 	// Static marks a code-defined profile: read-only, no timestamps.
 	Static bool
 
+	// Customized lists the fields a workspace overlay changed (static
+	// profiles only; see ApplyOverlay).
+	Customized []llmv1.AgentProfileOverlayField
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -114,6 +118,9 @@ func (p *Profile) clone() *Profile {
 	if p.SystemPromptSections != nil {
 		out.SystemPromptSections = make([]*llmv1.SystemPromptSection, len(p.SystemPromptSections))
 		copy(out.SystemPromptSections, p.SystemPromptSections)
+	}
+	if p.Customized != nil {
+		out.Customized = append([]llmv1.AgentProfileOverlayField(nil), p.Customized...)
 	}
 	return &out
 }
@@ -147,6 +154,9 @@ func (p *Profile) ToProto() *llmv1.AgentProfile {
 		MemoryEnabled:        p.MemoryEnabled,
 		IsStatic:             p.Static,
 		ToolPolicy:           p.ToolPolicy,
+	}
+	if len(p.Customized) > 0 {
+		out.Customized = append([]llmv1.AgentProfileOverlayField(nil), p.Customized...)
 	}
 	if v := strings.TrimSpace(p.LlmProviderID); v != "" {
 		out.LlmProviderId = proto.String(v)
