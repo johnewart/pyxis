@@ -13,8 +13,10 @@ import { describe, expect, it } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import { createRouterTransport } from '@connectrpc/connect';
 import {
+  AgentProfileOverlayField,
   AgentProfileSchema,
   LlmService,
+  type SetAgentProfileOverlayRequest,
   ToolPolicy,
   type CreateAgentProfileRequest,
   type CreateSessionFromAgentProfileRequest,
@@ -24,8 +26,45 @@ import {
   agentProfileFromProto,
   createLlmdAgentProfile,
   createLlmdSessionFromAgentProfile,
+  setLlmdAgentProfileOverlay,
   updateLlmdAgentProfile,
 } from '../src/agentProfiles.js';
+
+describe('setLlmdAgentProfileOverlay', () => {
+  it('sends only the optionals that are set, and an explicit false', async () => {
+    let seen: SetAgentProfileOverlayRequest | undefined;
+    const transport = createRouterTransport(({ service }) => {
+      service(LlmService, {
+        setAgentProfileOverlay(req) {
+          seen = req;
+          return {
+            overlay: { ...req.overlay, updatedAt: '2026-11-23T00:00:00Z' },
+            profile: { id: 'plugin-editor', name: 'Editor', isStatic: true, customized: [AgentProfileOverlayField.TOOLS] },
+          };
+        },
+      });
+    });
+    const res = await setLlmdAgentProfileOverlay({
+      transport,
+      tenantId: 'ws',
+      overlay: {
+        baseId: ' plugin-editor ',
+        memoryEnabled: false,
+        toolOverrides: [{ toolName: 'review', enabled: false }],
+        sectionReplacements: [],
+        extraSections: [{ id: 'mine', content: 'my rule' }],
+      },
+    });
+    expect(seen?.overlay?.baseId).toBe('plugin-editor');
+    expect(seen?.overlay?.memoryEnabled).toBe(false);
+    expect(seen?.overlay?.defaultModel).toBeUndefined();
+    expect(seen?.overlay?.llmProviderId).toBeUndefined();
+    expect(seen?.overlay?.toolOverrides).toEqual([expect.objectContaining({ toolName: 'review', enabled: false })]);
+    expect(seen?.overlay?.extraSections?.[0]?.id).toBe('mine');
+    expect(res.overlay.updatedAt).toBe('2026-11-23T00:00:00Z');
+    expect(res.profile.customized).toEqual([AgentProfileOverlayField.TOOLS]);
+  });
+});
 import type { ClientTool } from '../src/llm.js';
 
 describe('agentProfileFromProto', () => {
@@ -61,9 +100,23 @@ describe('agentProfileFromProto', () => {
       createdAt: '',
       updatedAt: '',
       isStatic: true,
+      customized: [],
     });
     // A disabled mapping must survive as an explicit false, never be dropped.
     expect(out.toolMapping[0].enabled).toBe(false);
+  });
+
+  it('carries the fields an overlay customized', () => {
+    const p = create(AgentProfileSchema, {
+      id: 'plugin-editor',
+      name: 'Editor',
+      isStatic: true,
+      customized: [AgentProfileOverlayField.DEFAULT_MODEL, AgentProfileOverlayField.TOOLS],
+    });
+    expect(agentProfileFromProto(p).customized).toEqual([
+      AgentProfileOverlayField.DEFAULT_MODEL,
+      AgentProfileOverlayField.TOOLS,
+    ]);
   });
 
   it('carries set optionals and dynamic-profile timestamps through', () => {

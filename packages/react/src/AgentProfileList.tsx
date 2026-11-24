@@ -3,14 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Lists agent profiles with create / edit / delete flows built on
- * AgentProfileEditor. Static profiles open read-only and cannot be deleted.
- * Transport-agnostic: the host wires callbacks to its @pyxis-llm/client calls.
+ * AgentProfileEditor. Static profiles cannot be deleted; when the host passes
+ * the overlay callbacks they open in AgentProfileOverlayEditor (customize per
+ * workspace), otherwise read-only. Transport-agnostic: the host wires
+ * callbacks to its @pyxis-llm/client calls.
  */
 
 import { useState } from 'react';
 import { Alert, Badge, Button, Group, Paper, Stack, Text } from '@mantine/core';
-import type { LlmdAgentProfile, LlmdAgentProfileSpec } from '@pyxis-llm/client';
+import type { LlmdAgentProfile, LlmdAgentProfileOverlay, LlmdAgentProfileSpec } from '@pyxis-llm/client';
 import { AgentProfileEditor, type AgentProfileToolOption } from './AgentProfileEditor.js';
+import { AgentProfileOverlayEditor, type AgentProfileOverlayDraft } from './AgentProfileOverlayEditor.js';
 import type { ChatModelOption } from './chatModelOptions.js';
 
 export type AgentProfileListProps = {
@@ -24,6 +27,14 @@ export type AgentProfileListProps = {
   onUpdate: (id: string, spec: LlmdAgentProfileSpec) => Promise<void> | void;
   /** e.g. `deleteLlmdAgentProfile`. */
   onDelete: (id: string) => Promise<void> | void;
+  /**
+   * Overlay callbacks (e.g. getLlmdAgentProfileOverlay, setLlmdAgentProfileOverlay,
+   * resetLlmdAgentProfileOverlay). When all three are given, a static profile
+   * opens in the customize editor; otherwise it opens read-only.
+   */
+  onLoadOverlay?: (id: string) => Promise<{ overlay: LlmdAgentProfileOverlay; base: LlmdAgentProfile }>;
+  onSaveOverlay?: (overlay: AgentProfileOverlayDraft) => Promise<void> | void;
+  onResetOverlay?: (id: string) => Promise<void> | void;
 };
 
 type Editing = { mode: 'create' } | { mode: 'edit'; profile: LlmdAgentProfile };
@@ -36,7 +47,11 @@ export function AgentProfileList({
   onCreate,
   onUpdate,
   onDelete,
+  onLoadOverlay,
+  onSaveOverlay,
+  onResetOverlay,
 }: AgentProfileListProps) {
+  const canCustomize = Boolean(onLoadOverlay && onSaveOverlay && onResetOverlay);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -59,6 +74,22 @@ export function AgentProfileList({
     else await onUpdate(editing.profile.id, spec);
     setEditing(null);
   };
+
+  if (editing?.mode === 'edit' && editing.profile.isStatic && canCustomize) {
+    return (
+      <AgentProfileOverlayEditor
+        key={editing.profile.id}
+        profileId={editing.profile.id}
+        tools={tools}
+        modelOptions={modelOptions}
+        modelsLoading={modelsLoading}
+        onLoad={onLoadOverlay!}
+        onSave={onSaveOverlay!}
+        onReset={onResetOverlay!}
+        onClose={() => setEditing(null)}
+      />
+    );
+  }
 
   if (editing) {
     return (
@@ -90,7 +121,12 @@ export function AgentProfileList({
                 <Text fw={600}>{p.name}</Text>
                 {p.isStatic ? (
                   <Badge variant="light" color="gray">
-                    static
+                    built in
+                  </Badge>
+                ) : null}
+                {p.isStatic && (p.customized?.length ?? 0) > 0 ? (
+                  <Badge variant="light" color="blue">
+                    customized
                   </Badge>
                 ) : null}
               </Group>
@@ -104,10 +140,10 @@ export function AgentProfileList({
               <Button
                 size="xs"
                 variant="subtle"
-                aria-label={`${p.isStatic ? 'View' : 'Edit'} ${p.name}`}
+                aria-label={`${p.isStatic ? (canCustomize ? 'Customize' : 'View') : 'Edit'} ${p.name}`}
                 onClick={() => setEditing({ mode: 'edit', profile: p })}
               >
-                {p.isStatic ? 'View' : 'Edit'}
+                {p.isStatic ? (canCustomize ? 'Customize' : 'View') : 'Edit'}
               </Button>
               {p.isStatic ? null : (
                 <Button

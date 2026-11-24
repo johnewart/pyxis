@@ -220,5 +220,16 @@ export {
 export type { AgentProfileListProps } from './AgentProfileList.js';
 export { AgentProfileList } from './AgentProfileList.js';
 
+export type {
+  AgentProfileOverlayEditorProps,
+  AgentProfileOverlayDraft,
+  OverlayFormState,
+} from './AgentProfileOverlayEditor.js';
+export {
+  AgentProfileOverlayEditor,
+  buildAgentProfileOverlay,
+  overlayFormState,
+} from './AgentProfileOverlayEditor.js';
+
 export type { ProviderAuthTerminalProps } from './ProviderAuthTerminal.js';
 export { ProviderAuthTerminal } from './ProviderAuthTerminal.js';
