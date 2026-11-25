@@ -76,7 +76,7 @@ jobs:
           fi
           node scripts/set-npm-versions.mjs --tag "$version"
 
-      - name: Refuse to publish a dev version or a file: link
+      - name: "Refuse to publish a dev version or a file: link"
         run: node scripts/check-npm-dev-version.mjs
 
       - name: Publish @pyxis-llm/client
