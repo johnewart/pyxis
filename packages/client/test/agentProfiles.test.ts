@@ -26,12 +26,12 @@ import {
   agentProfileFromProto,
   createLlmdAgentProfile,
   createLlmdSessionFromAgentProfile,
-  listLlmdTools,
+  listAgentTools,
   setLlmdAgentProfileOverlay,
   updateLlmdAgentProfile,
 } from '../src/agentProfiles.js';
 
-describe('listLlmdTools', () => {
+describe('listAgentTools', () => {
   // Regression: profile editors listed tools via listSessionTools, which needs
   // a session; a settings page has none, so the tool list was always empty.
   it('lists tenant tools through ListTools with the scope headers, sorted', async () => {
@@ -50,7 +50,7 @@ describe('listLlmdTools', () => {
         },
       });
     });
-    const tools = await listLlmdTools({ transport, tenantId: 'local', scopeId: 'default' });
+    const tools = await listAgentTools({ transport, tenantId: 'local', scopeId: 'default' });
     expect(tenant).toBe('local');
     expect(tools).toEqual([
       { name: 'read_code', description: '' },

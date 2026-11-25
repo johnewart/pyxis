@@ -116,7 +116,7 @@ function toolMappingToProto(
 }
 
 /** A tool that exists for the caller's tenant, as a profile's tool mapping can name it. */
-export type LlmdToolInfo = {
+export type AgentToolInfo = {
   name: string;
   description: string;
 };
@@ -127,7 +127,7 @@ export type LlmdToolInfo = {
  * tools. Session-independent, and the same set llmd validates profile tool
  * mappings against, so it is what a profile editor should offer.
  */
-export async function listLlmdTools(opts: BaseOpts): Promise<LlmdToolInfo[]> {
+export async function listAgentTools(opts: BaseOpts): Promise<AgentToolInfo[]> {
   const client = resolveLlmServiceClient(opts);
   const res = await callUnary(
     (o) => client.listTools({}, o),
@@ -135,7 +135,7 @@ export async function listLlmdTools(opts: BaseOpts): Promise<LlmdToolInfo[]> {
     undefined,
     { label: "listTools" }
   );
-  const out: LlmdToolInfo[] = [];
+  const out: AgentToolInfo[] = [];
   for (const t of res.tools ?? []) {
     const name = t.name?.trim();
     if (name) out.push({ name, description: t.description ?? "" });
