@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyxis-client"
+version = "9999999.1791346824.0"
+description = "Python gRPC client for Pyxis"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+dependencies = ["grpcio>=1.60", "grpcio-status>=1.60", "protobuf>=5", "googleapis-common-protos>=1.60"]
+
+[project.urls]
+Homepage = "https://github.com/johnewart/pyxis"
+Repository = "https://github.com/johnewart/pyxis"
+Issues = "https://github.com/johnewart/pyxis/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pyxis_client = ["py.typed"]

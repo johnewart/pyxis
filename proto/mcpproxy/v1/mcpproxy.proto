@@ -1,0 +1,189 @@
+syntax = "proto3";
+
+package mcpproxy.v1;
+
+option go_package = "github.com/johnewart/pyxis/gen/mcpproxy/v1;mcpproxyv1";
+
+// McpProxyService is llmd's upstream-MCP surface: llmd acting as an MCP *client*
+// against servers the user configured. llmd owns the runtime — it spawns the
+// upstream processes, resolves secret refs at spawn, composes proxied tool ids,
+// decides which provider is ready, and dispatches tool calls. the client asks:
+// it pushes the configured set (which still lives in the client's app config)
+// and reads back status, tools and call results verbatim.
+//
+// Gating is additive. When the MCP feature is off the registry never connects a
+// server and never registers a tool, so ListProviders/ListProxiedTools come
+// back empty and no proxied tool appears in any description or error text.
+// Nothing is built and then pruned.
+
+// McpTransportKind is the wire shape of an upstream MCP server.
+enum McpTransportKind {
+  MCP_TRANSPORT_KIND_UNSPECIFIED = 0;
+  MCP_TRANSPORT_KIND_STDIO = 1;
+  MCP_TRANSPORT_KIND_HTTP = 2;
+  MCP_TRANSPORT_KIND_SSE = 3;
+}
+
+// McpTransportConfig mirrors the client's transport schema. Env and Headers
+// carry secret *refs* (or literals) — never resolved secret values. llmd
+// resolves a ref at spawn time through its own secret resolver.
+message McpTransportConfig {
+  McpTransportKind type = 1;
+  string command = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  string cwd = 5;
+  string url = 6;
+  map<string, string> headers = 7;
+}
+
+// McpServerConfig mirrors the client's server-config schema.
+message McpServerConfig {
+  bool enabled = 1;
+  string display_name = 2;
+  repeated string attach_to_agents = 3;
+  string default_classification = 4;
+  repeated string read_only_tool_allowlist = 5;
+  map<string, string> tool_classifications = 6;
+  McpTransportConfig transport = 7;
+  int32 call_timeout_ms = 8;
+  // Scope allowlist. Empty means every scope.
+  repeated string scopes = 9;
+}
+
+enum McpProviderStatus {
+  MCP_PROVIDER_STATUS_UNSPECIFIED = 0;
+  MCP_PROVIDER_STATUS_CONNECTING = 1;
+  MCP_PROVIDER_STATUS_READY = 2;
+  MCP_PROVIDER_STATUS_ERROR = 3;
+  MCP_PROVIDER_STATUS_DISABLED = 4;
+}
+
+// McpProviderSnapshot is the status surface the client's settings page renders.
+// llmd is the sole author of these fields; the client never recomputes one.
+message McpProviderSnapshot {
+  string provider_id = 1;
+  McpProviderStatus status = 2;
+  string display_name = 3;
+  int32 tool_count = 4;
+  int32 resource_count = 5;
+  int32 prompt_count = 6;
+  repeated string registered_tool_ids = 7;
+  string last_refresh_at = 8;
+  string last_error = 9;
+}
+
+// ProxiedTool is one upstream tool as an agent sees it. input_schema_json is the
+// upstream JSON Schema verbatim; it travels as JSON text so llmd never has to
+// re-shape a schema it does not own.
+message ProxiedTool {
+  string tool_id = 1;
+  string provider_id = 2;
+  string upstream_name = 3;
+  string description = 4;
+  string input_schema_json = 5;
+  bool read_only = 6;
+}
+
+message McpResource {
+  string uri = 1;
+  string name = 2;
+  string description = 3;
+  string mime_type = 4;
+}
+
+message McpPromptArgument {
+  string name = 1;
+  string description = 2;
+  bool required = 3;
+}
+
+message McpPrompt {
+  string name = 1;
+  string description = 2;
+  repeated McpPromptArgument arguments = 3;
+}
+
+// SetProviders reconciles llmd's live providers against the configured set.
+// It is the only way the configured set enters llmd: disabled or absent
+// providers are closed, changed providers reconnect.
+message SetProvidersRequest {
+  map<string, McpServerConfig> servers = 1;
+}
+
+message SetProvidersResponse {
+  repeated McpProviderSnapshot providers = 1;
+}
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  repeated McpProviderSnapshot providers = 1;
+  // False when the MCP feature is not registered at all.
+  bool enabled = 2;
+}
+
+// ListProxiedTools returns every ready proxied tool plus the two id sets
+// the client's agent composition needs: the explicit_ids set for this agent and
+// the full_registry set for the caller's scope. llmd applies attachToAgents and the
+// scope allowlist; the client does not re-filter on those. Tenant and scope come
+// from request metadata (llmd-tenant-id / llmd-scope-id).
+message ListProxiedToolsRequest {
+  string agent_id = 1;
+}
+
+message ListProxiedToolsResponse {
+  repeated ProxiedTool tools = 1;
+  // attachToAgents-scoped ids for agent_id (explicit_ids agents).
+  repeated string agent_tool_ids = 2;
+  // Every ready id allowed in the caller's scope (full_registry agents).
+  repeated string scope_tool_ids = 3;
+}
+
+message CallProxiedToolRequest {
+  string tool_id = 1;
+  // JSON object of tool arguments.
+  string args_json = 2;
+}
+
+message CallProxiedToolResponse {
+  string text = 1;
+}
+
+message GetProviderCatalogRequest {
+  string provider_id = 1;
+}
+
+message GetProviderCatalogResponse {
+  string provider_id = 1;
+  repeated McpResource resources = 2;
+  repeated McpPrompt prompts = 3;
+}
+
+// ProbeProvider connects, lists tools and disconnects without registering
+// anything — the settings page's "test connection".
+message ProbeProviderRequest {
+  string provider_id = 1;
+  McpServerConfig config = 2;
+}
+
+message ProbeProviderResponse {
+  bool ok = 1;
+  string error = 2;
+  int32 tool_count = 3;
+  repeated ProbedTool tools = 4;
+}
+
+message ProbedTool {
+  string name = 1;
+  string description = 2;
+}
+
+service McpProxyService {
+  rpc SetProviders(SetProvidersRequest) returns (SetProvidersResponse);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  rpc ListProxiedTools(ListProxiedToolsRequest) returns (ListProxiedToolsResponse);
+  rpc CallProxiedTool(CallProxiedToolRequest) returns (CallProxiedToolResponse);
+  rpc GetProviderCatalog(GetProviderCatalogRequest) returns (GetProviderCatalogResponse);
+  rpc ProbeProvider(ProbeProviderRequest) returns (ProbeProviderResponse);
+}

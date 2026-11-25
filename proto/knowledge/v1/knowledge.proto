@@ -1,0 +1,150 @@
+syntax = "proto3";
+
+package knowledge.v1;
+
+option go_package = "github.com/johnewart/pyxis/gen/knowledge/v1;knowledgev1";
+
+// Knowledge indexing and semantic search (separate SQLite DB + sqlite-vec + ONNX embeddings).
+//
+// Scope: reuse gRPC metadata "llmd-tenant-id" / "llmd-scope-id" (same as LlmService) for every
+// RPC below. There is no per-request tenant or scope field: one caller, one scope, same as
+// everywhere else in llmd's API surface.
+//
+// Defaults (server-side when fields unset):
+// - chunk_size_chars: 1024
+// - chunk_overlap_chars: 0 (set explicitly to enable overlap; must be < chunk_size)
+// - limit on Query: 10
+
+service KnowledgeService {
+  rpc UpsertDocuments(UpsertDocumentsRequest) returns (UpsertDocumentsResponse);
+  rpc DeleteDocuments(DeleteDocumentsRequest) returns (DeleteDocumentsResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+  // Live count of what is actually indexed, so callers never have to infer
+  // index currency from their own bookkeeping. A checkpoint file cannot know
+  // whether the vectors still exist; this can.
+  rpc CountDocuments(CountDocumentsRequest) returns (CountDocumentsResponse);
+}
+
+enum KnowledgeRemediation {
+  KNOWLEDGE_REMEDIATION_UNSPECIFIED = 0;
+  REINDEX_REQUIRED = 1;
+  NEW_SCOPE_REQUIRED = 2;
+}
+
+// Attached as gRPC error details on FailedPrecondition (embedding model mismatch).
+message KnowledgeError {
+  string stored_model_id = 1;
+  string requested_model_id = 2;
+  int32 stored_dimension = 3;
+  int32 requested_dimension = 4;
+  KnowledgeRemediation remediation = 5;
+}
+
+message EmbeddingConfig {
+  optional string provider_id = 1;
+  string model = 2;
+  int32 dimensions = 3;
+  string index_model_id = 4;
+}
+
+message DocumentInput {
+  string logical_document_id = 1;
+  string source_id = 2;
+  string name = 3;
+  string content = 4;
+  map<string, string> metadata = 5;
+}
+
+message UpsertDocumentsRequest {
+  reserved 1;
+  // When unset, server default from env / MiniLM.
+  optional string embedding_model_id = 2;
+  optional int32 chunk_size_chars = 3;
+  optional int32 chunk_overlap_chars = 4;
+  repeated DocumentInput documents = 5;
+  // Default source_id for documents that omit source_id (repo partition / namespace).
+  string default_source_id = 6;
+  // Chunk preparation strategy: "files" | "ast".
+  string chunk_strategy = 7;
+  optional EmbeddingConfig embedding = 8;
+}
+
+message UpsertDocumentsResponse {
+  int32 chunks_written = 1;
+}
+
+message DocumentRef {
+  string source_id = 1;
+  string logical_document_id = 2;
+}
+
+message DeleteDocumentsRequest {
+  reserved 1;
+  repeated DocumentRef documents = 2;
+  // When set, deletes all chunks for this source in the scope (documents list ignored).
+  optional string delete_all_for_source_id = 3;
+  // When set, deletes chunks for one file (logical id = path or path::symbol) in delete_for_file_source_id.
+  string delete_for_file_path = 4;
+  string delete_for_file_source_id = 5;
+}
+
+message DeleteDocumentsResponse {
+  int32 chunks_deleted = 1;
+}
+
+message QueryRequest {
+  reserved 1;
+  string query = 2;
+  int32 limit = 3;
+  optional string embedding_model_id = 4;
+  bool enable_rerank = 5;
+  // Filter hits to one source_id partition (codesearch repo root, knowledge namespace, etc.).
+  string source_id = 6;
+  // Optional multi-repo / multi-namespace search within the scope.
+  repeated string source_ids = 7;
+  optional EmbeddingConfig embedding = 8;
+  /**
+   * Search a DERIVED partition instead of the live index: its own chunks for
+   * the files that derivation re-embedded, the live index's chunks for every
+   * other file. This is the search half of a graph overlay and takes the same
+   * value IndexService.DeriveToCommit returned as knowledge_partition_id.
+   *
+   * Empty searches the live index, which never sees derived rows. A partition
+   * id llmd does not know answers from its own rows alone — under-answering
+   * loudly beats serving a fragment as though it were the whole index.
+   */
+  string partition_id = 9;
+}
+
+message QueryHit {
+  string chunk_id = 1;
+  string logical_document_id = 2;
+  string source_id = 3;
+  string name = 4;
+  string content = 5;
+  double score = 6;
+  map<string, string> metadata = 7;
+  /**
+   * Which partition actually answered: the queried derivation, or "" when the
+   * hit came through its base. Lets a caller see reuse rather than infer it.
+   */
+  string partition_id = 8;
+}
+
+message QueryResponse {
+  repeated QueryHit hits = 1;
+}
+
+message CountDocumentsRequest {
+  reserved 1;
+  // Restrict to one source partition (codesearch repo root). Empty = whole scope.
+  string source_id = 2;
+}
+
+message CountDocumentsResponse {
+  // Distinct indexed FILES (logical ids collapsed at "::"), comparable to the
+  // graph's file-node count.
+  int64 file_count = 1;
+  // Raw chunk rows backing those files.
+  int64 chunk_count = 2;
+}

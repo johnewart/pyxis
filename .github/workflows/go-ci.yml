@@ -1,0 +1,50 @@
+name: go-ci
+
+on:
+  push:
+    paths:
+      - "**/*.go"
+      # **/ so the nested modules (cmd/llmd, examples/embed) trigger CI too: a
+      # bare "go.mod" matches only the root module's file.
+      - "**/go.mod"
+      - "**/go.sum"
+      - ".github/workflows/go-ci.yml"
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "**/go.mod"
+      - "**/go.sum"
+      - ".github/workflows/go-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Toolchain (CGO)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Unit tests (includes knowledge store when embedder init succeeds)
+        run: go test ./... -count=1
+
+      # cmd/llmd is its own module, so `go test ./...` above never compiles it.
+      - name: Build llmd binary (separate module)
+        run: go build -C cmd/llmd ./...
+
+      # THE PUBLIC API BOUNDARY CHECK.
+      #
+      # examples/embed builds a complete llmd host from a module path outside
+      # github.com/johnewart/pyxis/, so Go's internal rule makes every
+      # llmd/internal/... import a compile error there. If llmd's public
+      # surface stops being sufficient to host llmd, THIS step fails.
+      #
+      # It has to be its own step: no package inside llmd's import-path tree can
+      # check this, because the internal rule is textual and they all share the
+      # prefix. Do not "fix" a failure here by importing an internal package in
+      # the example — widen the public API instead.
+      - name: Public API is sufficient to embed llmd (boundary enforcement)
+        run: go build -C examples/embed ./...

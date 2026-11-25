@@ -1,0 +1,155 @@
+packages:
+  llmd:
+    root: .
+    dependencies:
+      build:
+      - go:1.25.5
+      - node:20.19.5
+    build_targets:
+    - name: dist
+      commands:
+      - npm --prefix packages/client install
+      - npm --prefix packages/client run build
+      - npm --prefix packages/core install
+      - npm --prefix packages/core run build
+      - npm --prefix packages/react install
+      - npm --prefix packages/react run build
+      description: 'Build packages/{client,core,react}/dist for file: consumers (always
+        re-run: dist is git-ignored)'
+    - name: dev
+      commands:
+      - go build -o ./llmd ./cmd/llmd && overmind s
+      description: Build the llmd binary and start overmind (long-running)
+    - name: test
+      commands:
+      - go test ./...
+      - python3 -m pip install ./packages/python-client[test]
+      - python3 -m pytest packages/python-client/tests
+      description: Standard unit test run (Go tests, then Python client tests including
+        the fake-server smoke test)
+    - name: integration
+      commands: []
+      require_targets:
+      - integration-claude
+      - integration-gemini
+      - integration-embeddings
+      description: Run all integration suites
+    - name: integration-claude
+      commands:
+      - go test -tags=integration -count=1 -v ./integration/claudecode/... ./internal/llm/claudecode/...
+      description: Claude Code CLI integration tests (needs claude on PATH or CLAUDE_CLI_PATH)
+    - name: integration-gemini
+      commands:
+      - go test -tags=integration -count=1 -v ./integration/gemini/... ./internal/llm/gemini/...
+      description: Gemini CLI integration tests (needs gemini on PATH or GEMINI_CLI_PATH)
+    - name: integration-embeddings
+      commands:
+      - go test -tags=integration -p 1 -count=1 -v ./internal/index/... ./internal/knowledge/store/...
+      description: Real ONNX embedder + sqlite-vec suites; -p 1 avoids concurrent
+        model downloads
+    - name: integration-all
+      commands:
+      - go test -tags=integration -count=1 -v ./...
+      description: Every -tags=integration package in the module
+    - name: npm-version-dev
+      commands:
+      - node scripts/set-npm-versions.mjs --dev
+      description: Set @pyxis-llm/* to a fresh 9999999.<unix-seconds>.0 dev version
+        (never publish to the real registry)
+    - name: npm-version-release
+      commands:
+      - node scripts/set-npm-versions.mjs --tag {{tag}}
+      description: Set a released version on every @pyxis-llm/* package, in lockstep
+    - name: npm-check-versions
+      commands:
+      - node scripts/check-npm-dev-version.mjs
+      description: Fail if any @pyxis-llm/* package.json is still on a 9999999.* dev
+        version
+    - name: python-wheel
+      commands:
+      - uv build --wheel --out-dir packages/python-client/dist packages/python-client
+      description: Build the pyxis-client Python wheel into packages/python-client/dist
+        (uv build)
+    - name: install-git-hooks
+      commands:
+      - cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
+      - chmod +x .git/hooks/pre-commit
+      description: Install the pre-commit hook that runs npm-check-versions
+    - name: client-test
+      commands:
+      - npm --prefix packages/client install
+      - npm --prefix packages/client test
+      description: Run the @pyxis-llm/client vitest unit tests
+    - name: react-test
+      commands:
+      - npm --prefix packages/react/e2e install
+      - npm --prefix packages/react/e2e test
+      require_targets:
+      - dist
+      description: 'Run the @pyxis-llm/react vitest suite (packages/react/e2e: jsdom
+        component tests + real-llmd tests)'
+    - name: client-typecheck
+      commands:
+      - npm install
+      - npx tsc -p tsconfig.json --noEmit
+      root: packages/client
+      description: Type-check @pyxis-llm/client with tsc --noEmit
+    - name: react-unit-test
+      commands:
+      - npm --prefix packages/react/e2e install
+      - npm --prefix packages/react/e2e run test:unit
+      description: 'Run @pyxis-llm/react''s unit suite (packages/react/e2e test:unit:
+        charts, display cards, plugins, chat driver). Tests the built dist/: build
+        packages/{client,core,react} first (konstruct''s konstruct-app:llmd-packages
+        does it)'
+    - name: test-pkg
+      commands:
+      - go test {{pkg+}}
+      description: 'Run Go unit tests for one or more package patterns (default: all)'
+    - name: test-go
+      commands:
+      - go test -count=1 {{pkg+}}
+      description: Go unit tests for one or more package patterns (default all)
+    - name: ts-test
+      commands:
+      - npm test --prefix {{dir}}
+      description: Run vitest for one TypeScript package directory
+    - name: proto-go
+      commands:
+      - make generate
+      description: Regenerate Go protobuf/gRPC code in gen/ from proto/ (make generate)
+    - name: proto-ts
+      commands:
+      - npm --prefix packages/client install
+      - npm --prefix packages/client run proto:gen
+      description: Regenerate @pyxis-llm/client TypeScript protobuf code (npm run
+        proto:gen)
+    - name: build-modules
+      commands:
+      - go build -C cmd/llmd -o /dev/null .
+      - go build -C examples/embed -o /dev/null .
+      description: 'Build the nested Go modules go test ./... never compiles: cmd/llmd
+        (the binary) and examples/embed (the public-API boundary check), as go-ci.yml
+        does'
+params:
+  dir:
+    type: string
+    required: false
+    pattern: ""
+    description: Package directory, e.g. packages/client
+    multi: false
+    default: packages/react
+  pkg:
+    type: string
+    required: false
+    pattern: ""
+    description: Go package patterns, e.g. ./internal/llm/openai/...
+    multi: true
+    default:
+    - ./...
+  tag:
+    type: string
+    required: true
+    pattern: ^v\d+\.\d+\.\d+.*$
+    description: Release tag, e.g. v1.2.3
+    multi: false

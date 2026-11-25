@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed via `just install-git-hooks`. Blocks commits that carry the npm
+# dev sentinel version (see scripts/check-npm-dev-version.mjs).
+set -e
+node "$(git rev-parse --show-toplevel)/scripts/check-npm-dev-version.mjs"

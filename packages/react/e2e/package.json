@@ -1,0 +1,29 @@
+{
+  "name": "@pyxis-llm/react-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests rendering @pyxis-llm/react components against a real llmd binary + fake OpenAI provider (same harness as @pyxis-llm/client's e2e suite).",
+  "type": "module",
+  "scripts": {
+    "build:llmd": "node scripts/build-llmd.mjs",
+    "test": "npm run build:llmd && vitest run",
+    "test:unit": "vitest run sessionEventsSubscription.test.tsx messageAddressing.test.tsx sessionSwitch.test.tsx chatMessageHooks.test.tsx chatSegments.test.tsx queueSend.test.tsx sendMode.test.tsx displayCards.test.ts charts.test.tsx displayCardPlacement.test.tsx llmdPlugins.test.tsx messageUsage.test.tsx remarkAlerts.test.tsx"
+  },
+  "dependencies": {
+    "@pyxis-llm/client": "file:../../client",
+    "@pyxis-llm/core": "file:../../core",
+    "@pyxis-llm/react": "file:..",
+    "@mantine/core": "^7.15.0",
+    "@mantine/hooks": "^7.15.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

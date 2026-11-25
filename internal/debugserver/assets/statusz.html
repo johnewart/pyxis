@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>llmd · statusz</title>
+  <link rel="stylesheet" href="/debug/statusz.css" />
+</head>
+<body>
+  <header>
+    <h1>llmd diagnostics</h1>
+    <div class="controls">
+      <label><input type="checkbox" id="autorefresh" /> auto-refresh (5s)</label>
+      <button id="refresh">refresh</button>
+      <a href="/debug/statusz?format=json">json</a>
+    </div>
+  </header>
+
+  <main id="content">
+    <p class="loading">loading…</p>
+  </main>
+
+  <section class="pprof">
+    <h2>pprof</h2>
+    <ul>
+      <li><a href="/debug/pprof/">index</a></li>
+      <li><a href="/debug/pprof/heap?debug=1">heap</a></li>
+      <li><a href="/debug/pprof/allocs?debug=1">allocs</a></li>
+      <li><a href="/debug/pprof/goroutine?debug=1">goroutine</a></li>
+      <li><a href="/debug/pprof/profile?seconds=30">cpu profile (30s)</a></li>
+      <li><a href="/debug/pprof/trace?seconds=5">trace (5s)</a></li>
+    </ul>
+  </section>
+
+  <script src="/debug/statusz.js"></script>
+</body>
+</html>

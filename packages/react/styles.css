@@ -1,0 +1,389 @@
+/*
+ * @pyxis-llm/react default styles: a document-style transcript, not chat bubbles.
+ *
+ *   import '@pyxis-llm/react/styles.css'   // after '@mantine/core/styles.css'
+ *
+ * Assistant turns read as plain prose in a centred reading column; user turns
+ * are marked by an accent bar (see ChatMessage's role header comment). Every
+ * colour comes from Mantine CSS variables, so light/dark schemes and a host's
+ * primaryColor apply without overrides. Hosts restyle by overriding the
+ * --llmd-* custom properties below, or the BEM classes the components emit.
+ */
+
+.llmd-chat-panel {
+  --llmd-column-width: 46rem;
+  --llmd-gutter: var(--mantine-spacing-lg);
+  --llmd-accent: var(--mantine-primary-color-filled);
+  --llmd-user-tint: var(--mantine-primary-color-light);
+  --llmd-code-bg: var(--mantine-color-default-hover);
+  --llmd-rule: var(--mantine-color-default-border);
+
+  background: var(--mantine-color-body);
+}
+
+/* ---- transcript column ------------------------------------------------- */
+
+.llmd-chat-panel__messages .mantine-ScrollArea-viewport > div {
+  /* ScrollArea's content wrapper is display:table; make it a centred column. */
+  display: block !important;
+  max-width: calc(var(--llmd-column-width) + 2 * var(--llmd-gutter));
+  margin: 0 auto;
+  padding: var(--mantine-spacing-xl) var(--llmd-gutter) var(--mantine-spacing-md);
+}
+
+.chat-message {
+  position: relative;
+  padding: var(--mantine-spacing-sm) 0;
+  color: var(--mantine-color-text);
+}
+
+/* Breathing room where the speaker changes. */
+.chat-message--user + .chat-message--assistant,
+.chat-message--assistant + .chat-message--user {
+  margin-top: var(--mantine-spacing-md);
+}
+
+/* ---- user turns: accent bar, faint tint, no bubble ---------------------- */
+
+.chat-message--user {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md);
+  border-left: 3px solid var(--llmd-accent);
+  background: var(--llmd-user-tint);
+  border-radius: 0 var(--mantine-radius-sm) var(--mantine-radius-sm) 0;
+}
+
+.chat-message--user .chat-message__content {
+  font-weight: 500;
+}
+
+/* ---- other roles (system etc.) ----------------------------------------- */
+
+.chat-message--system {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+
+/* ---- header: role label for non user/assistant, badges, hover actions --- */
+
+.chat-message__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 0;
+}
+
+.chat-message__role {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+}
+
+.chat-message__role:empty {
+  display: none;
+}
+
+/* Raw/delete float over the top-right corner and only show on hover/focus, so
+   they cost no vertical space between turns. */
+.chat-message__raw-toggle,
+.chat-message__delete {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-message__raw-toggle + .chat-message__delete {
+  right: 24px;
+}
+
+.chat-message:hover .chat-message__raw-toggle,
+.chat-message:hover .chat-message__delete,
+.chat-message__raw-toggle:focus-visible,
+.chat-message__delete:focus-visible {
+  opacity: 1;
+}
+
+.chat-message__provider-badge {
+  margin-left: 6px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ---- prose ------------------------------------------------------------- */
+
+.chat-message__content {
+  font-size: var(--mantine-font-size-md);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.chat-message__content > :first-child,
+.chat-message__content > :first-child > :first-child {
+  margin-top: 0;
+}
+
+.chat-message__content > :last-child,
+.chat-message__content > :last-child > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-message__content p {
+  margin: 0 0 0.75em;
+}
+
+.chat-message__content h1,
+.chat-message__content h2,
+.chat-message__content h3,
+.chat-message__content h4 {
+  margin: 1.3em 0 0.5em;
+  line-height: 1.3;
+  font-weight: 650;
+}
+
+.chat-message__content h1 { font-size: 1.35em; }
+.chat-message__content h2 { font-size: 1.2em; }
+.chat-message__content h3 { font-size: 1.07em; }
+.chat-message__content h4 { font-size: 1em; }
+
+.chat-message__content ul,
+.chat-message__content ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.5em;
+}
+
+.chat-message__content li + li {
+  margin-top: 0.25em;
+}
+
+.chat-message__content a {
+  color: var(--mantine-color-anchor);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-message__content blockquote {
+  margin: 0 0 0.75em;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--llmd-rule);
+  color: var(--mantine-color-dimmed);
+}
+
+.llmd-callout {
+  --llmd-callout-color: var(--llmd-accent, var(--mantine-primary-color-filled));
+}
+
+blockquote.llmd-callout,
+.chat-message__content blockquote.llmd-callout {
+  padding: 0.5em 1em;
+  border: 1px solid var(--llmd-rule, var(--mantine-color-default-border));
+  border-left: 4px solid var(--llmd-callout-color);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--llmd-code-bg, var(--mantine-color-default-hover));
+  color: inherit;
+}
+
+.llmd-callout__title {
+  display: block;
+  margin-bottom: 0.25em;
+  font-weight: 600;
+  color: var(--llmd-callout-color);
+}
+
+.llmd-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.llmd-callout--note {
+  --llmd-callout-color: var(--mantine-color-blue-filled);
+}
+.llmd-callout--note .llmd-callout__title::before {
+  content: '\2139\FE0F  ';
+}
+.llmd-callout--tip {
+  --llmd-callout-color: var(--mantine-color-green-filled);
+}
+.llmd-callout--tip .llmd-callout__title::before {
+  content: '\1F4A1  ';
+}
+.llmd-callout--important {
+  --llmd-callout-color: var(--mantine-color-violet-filled);
+}
+.llmd-callout--important .llmd-callout__title::before {
+  content: '\2757  ';
+}
+.llmd-callout--warning {
+  --llmd-callout-color: var(--mantine-color-yellow-filled);
+}
+.llmd-callout--warning .llmd-callout__title::before {
+  content: '\26A0\FE0F  ';
+}
+.llmd-callout--caution {
+  --llmd-callout-color: var(--mantine-color-red-filled);
+}
+.llmd-callout--caution .llmd-callout__title::before {
+  content: '\1F6D1  ';
+}
+
+.chat-message__content hr {
+  border: 0;
+  border-top: 1px solid var(--llmd-rule);
+  margin: 1.25em 0;
+}
+
+.chat-message__content code {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 0.86em;
+  padding: 0.12em 0.35em;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--llmd-code-bg);
+}
+
+.chat-message__content pre {
+  margin: 0 0 0.9em;
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: 1px solid var(--llmd-rule);
+  border-radius: var(--mantine-radius-md);
+  background: var(--llmd-code-bg);
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.chat-message__content pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.84em;
+}
+
+.chat-message__content table {
+  border-collapse: collapse;
+  margin: 0 0 0.9em;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+}
+
+.chat-message__content th,
+.chat-message__content td {
+  border: 1px solid var(--llmd-rule);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+
+.chat-message__content th {
+  background: var(--llmd-code-bg);
+  font-weight: 600;
+}
+
+.chat-message__raw {
+  margin: 0;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+/* ---- live turn --------------------------------------------------------- */
+
+.chat-message__stream-placeholder {
+  display: inline-flex;
+  gap: 5px;
+  padding: 0.4em 0;
+}
+
+.chat-message__stream-placeholder-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mantine-color-dimmed);
+  animation: llmd-dot 1.2s infinite ease-in-out both;
+}
+
+.chat-message__stream-placeholder-dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-message__stream-placeholder-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes llmd-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+.chat-message__activity-preview {
+  margin: 0;
+  color: var(--mantine-color-dimmed);
+  font-style: italic;
+  font-size: var(--mantine-font-size-sm);
+}
+
+/* ---- footers / badges -------------------------------------------------- */
+
+.chat-message__footer-badges {
+  margin-top: var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.chat-message__usage-badge {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.chat-message__tracked-context,
+.chat-message__answered-cards,
+.chat-message__attachments {
+  margin-top: var(--mantine-spacing-xs);
+}
+
+/* ---- status bar + composer -------------------------------------------- */
+
+.llmd-chat-panel__session-bar,
+.llmd-chat-panel__turn-bar {
+  max-width: calc(var(--llmd-column-width) + 2 * var(--llmd-gutter));
+  width: 100%;
+  margin: 0 auto;
+  padding-left: var(--llmd-gutter) !important;
+  padding-right: var(--llmd-gutter) !important;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-dimmed);
+}
+
+.llmd-chat-panel .llmd-composer {
+  max-width: calc(var(--llmd-column-width) + 2 * var(--llmd-gutter));
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--mantine-spacing-xs) var(--llmd-gutter) var(--mantine-spacing-lg);
+}
+
+.llmd-composer__row {
+  align-items: flex-end;
+  padding: 6px 6px 6px var(--mantine-spacing-xs);
+  border: 1px solid var(--llmd-rule, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-color-default);
+  box-shadow: var(--mantine-shadow-xs);
+  transition: border-color 120ms ease;
+}
+
+.llmd-composer__row:focus-within {
+  border-color: var(--llmd-accent, var(--mantine-primary-color-filled));
+}
+
+/* The textarea sits inside the card: drop its own frame. */
+.llmd-composer__input textarea {
+  border: 0;
+  background: transparent;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: var(--mantine-font-size-md);
+  line-height: 1.5;
+}
+
+.llmd-composer__send {
+  border-radius: var(--mantine-radius-md);
+}

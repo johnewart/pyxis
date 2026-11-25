@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package llamacpp.v1;
+
+option go_package = "github.com/johnewart/pyxis/gen/llamacpp/v1;llamacppv1";
+
+// LlamaCppService is llmd's managed llama.cpp surface. llmd owns the runtime:
+// it resolves/downloads the llama-server binary, enumerates and downloads GGUF
+// models, spawns and reaps the single managed server process, polls its health
+// and reports the lifecycle phase. the client asks — it renders what this
+// service reports verbatim and never re-derives a phase, a readiness verdict or
+// a "which model is loaded" answer from its own state.
+//
+// Gating is additive: when llama.cpp support is not available the service is
+// never registered, so nothing downstream has to prune it.
+
+// LlamaPhase is the lifecycle phase of the managed llama-server process.
+enum LlamaPhase {
+  LLAMA_PHASE_UNSPECIFIED = 0;
+  LLAMA_PHASE_IDLE = 1;
+  LLAMA_PHASE_STARTING = 2;
+  LLAMA_PHASE_WAITING_HEALTH = 3;
+  LLAMA_PHASE_LOADING_MODEL = 4;
+  LLAMA_PHASE_READY = 5;
+  LLAMA_PHASE_STOPPING = 6;
+  LLAMA_PHASE_ERROR = 7;
+}
+
+// DownloadPhase is the phase of an in-flight GGUF download.
+enum DownloadPhase {
+  DOWNLOAD_PHASE_UNSPECIFIED = 0;
+  DOWNLOAD_PHASE_DOWNLOADING = 1;
+  DOWNLOAD_PHASE_COMPLETE = 2;
+  DOWNLOAD_PHASE_ERROR = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Binary resolution
+
+message EnsureBinaryRequest {
+  // When true, force-download the pinned release even if a binary is present.
+  bool force_upgrade = 1;
+  // Optional user-supplied llama-server path to prefer over the managed build.
+  string custom_binary_path = 2;
+}
+
+message EnsureBinaryResponse {
+  // Absolute path to the resolved llama-server binary.
+  string binary_path = 1;
+  // Version string reported by the resolved binary, when known.
+  string version = 2;
+  // Version of the pinned managed release llmd would install.
+  string available_version = 3;
+  // True when the resolved binary is the managed (llmd-downloaded) build.
+  bool managed = 4;
+  // Human-readable failure text; empty on success.
+  string error = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Models
+
+message LocalModel {
+  // Stable id used by Start/Download (typically the GGUF file stem).
+  string model_id = 1;
+  // Display name for pickers.
+  string model_name = 2;
+  // Absolute path to the GGUF file on disk.
+  string path = 3;
+  int64 size_bytes = 4;
+  // True when a partial/incomplete download is present on disk.
+  bool download_partial = 5;
+  // Hugging Face repo this model came from, when known.
+  string hf_repo = 6;
+}
+
+message ListModelsRequest {
+  // Directory to scan; empty means llmd's default models dir.
+  string model_dir = 1;
+}
+
+message ListModelsResponse {
+  repeated LocalModel models = 1;
+  // The directory actually scanned (resolved default when the request was empty).
+  string model_dir = 2;
+}
+
+message DownloadRequest {
+  // Hugging Face repo, e.g. "ggml-org/gemma-3-12b-it-GGUF".
+  string hf_repo = 1;
+  // Optional specific file within the repo.
+  string hf_file = 2;
+  // Optional revision/branch; empty means the repo default.
+  string hf_revision = 3;
+  // Destination directory; empty means llmd's default models dir.
+  string model_dir = 4;
+  // Optional catalog preset id this download is provisioning.
+  string catalog_id = 5;
+}
+
+// DownloadProgress is streamed while a GGUF download runs; the terminal message
+// carries COMPLETE (with model_path/model_id) or ERROR (with error text).
+message DownloadProgress {
+  DownloadPhase phase = 1;
+  int64 downloaded_bytes = 2;
+  // Zero when the total is not known (chunked/unsized responses).
+  int64 total_bytes = 3;
+  // File currently being fetched, for UI labels.
+  string file_label = 4;
+  // Set on the terminal COMPLETE message.
+  string model_path = 5;
+  string model_id = 6;
+  // Set on the terminal ERROR message.
+  string error = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+
+message StartRequest {
+  // Model to load. Empty starts nothing and is an error.
+  string model_id = 1;
+  // Directory the model lives in; empty means llmd's default models dir.
+  string model_dir = 2;
+  // Optional explicit binary path; empty resolves through EnsureBinary.
+  string binary_path = 3;
+  // Optional fixed port; zero lets llmd choose a free one.
+  int32 port = 4;
+  // Optional extra llama-server arguments.
+  repeated string extra_args = 5;
+  // Tenant and scope for attribution come from request metadata
+  // (llmd-tenant-id / llmd-scope-id), not from the body.
+}
+
+// SetManagedStateRequest mutates the app-global managed state. Fields left
+// unset are not changed, so a caller can flip `enabled` without disturbing the
+// pinned model (and vice versa).
+message SetManagedStateRequest {
+  optional bool enabled = 1;
+  // Empty string clears the pin; unset leaves it alone.
+  optional string active_model_id = 2;
+}
+
+message StopRequest {}
+
+message StatusRequest {}
+
+message StatusStreamRequest {}
+
+// LlamaStatus is llmd's authoritative view of the managed server. the client
+// renders it as-is.
+message LlamaStatus {
+  LlamaPhase phase = 1;
+  // Human-readable phase message for the UI.
+  string message = 2;
+  // Model currently loaded (or being loaded); empty when none.
+  string model_id = 3;
+  string model_dir = 4;
+  string binary_path = 5;
+  // Port and base URL of the running server; zero/empty when not running.
+  int32 port = 6;
+  string base_url = 7;
+  // OS pid of the managed process; zero when not running.
+  int32 pid = 8;
+  // Tenant that requested the current server, when known.
+  string tenant_id = 9;
+  // Managed-state: app-wide on/off plus the single pinned model.
+  bool enabled = 10;
+  string active_model_id = 11;
+  // Failure text for LLAMA_PHASE_ERROR; empty otherwise.
+  string error = 12;
+  // Scope (within tenant_id) that requested the current server, when known.
+  string scope_id = 13;
+}
+
+service LlamaCppService {
+  // Resolve (downloading if needed) the llama-server binary.
+  rpc EnsureBinary(EnsureBinaryRequest) returns (EnsureBinaryResponse);
+  // List GGUF models available on disk.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  // Download a GGUF, streaming progress until a terminal COMPLETE/ERROR.
+  rpc Download(DownloadRequest) returns (stream DownloadProgress);
+  // Start (or switch) the single managed llama-server.
+  rpc Start(StartRequest) returns (LlamaStatus);
+  // Stop the managed llama-server.
+  rpc Stop(StopRequest) returns (LlamaStatus);
+  // Set the app-global managed state (on/off plus the pinned model).
+  rpc SetManagedState(SetManagedStateRequest) returns (LlamaStatus);
+  // One-shot status snapshot.
+  rpc Status(StatusRequest) returns (LlamaStatus);
+  // Status snapshots pushed on every lifecycle transition.
+  rpc StatusStream(StatusStreamRequest) returns (stream LlamaStatus);
+}

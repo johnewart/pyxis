@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package llm.v1;
+
+import "llmv1/llm.proto";
+
+option go_package = "github.com/johnewart/pyxis/gen/llmv1;llmv1";
+
+// PolicyHookService lets an integrator veto LLM calls, filter tools and
+// permit tool calls. All messages are typed; there is no JSON pass-through.
+service PolicyHookService {
+  // Returns the CheckPolicy used for each hook's inputs.
+  rpc GetCheckPolicy(GetCheckPolicyRequest) returns (GetCheckPolicyResponse);
+  rpc CheckLLMCall(CheckLLMCallRequest) returns (CheckLLMCallResponse);
+  rpc FilterTools(FilterToolsRequest) returns (FilterToolsResponse);
+  rpc CheckToolCall(CheckToolCallRequest) returns (CheckToolCallResponse);
+}
+
+enum ContentScope {
+  CONTENT_SCOPE_FULL = 0;
+  CONTENT_SCOPE_LATEST = 1;
+  CONTENT_SCOPE_LATEST_N = 2;
+}
+
+enum Cadence {
+  CADENCE_EVERY_ROUND = 0;
+  CADENCE_FIRST_ROUND = 1;
+  CADENCE_EVERY_N_ROUNDS = 2;
+}
+
+enum Decision {
+  DECISION_ALLOW = 0;
+  DECISION_DENY = 1;
+}
+
+enum PolicyPurpose {
+  POLICY_PURPOSE_UNSPECIFIED = 0;
+  POLICY_PURPOSE_CHAT_STREAM = 1;
+  POLICY_PURPOSE_COMPLETE = 2;
+}
+
+enum PolicyEntryPath {
+  POLICY_ENTRY_PATH_UNSPECIFIED = 0;
+  POLICY_ENTRY_PATH_AGENT_LOOP = 1;
+  POLICY_ENTRY_PATH_MCP_SERVER = 2;
+}
+
+// CheckPolicy says which content a hook sees and on which rounds it is called.
+message CheckPolicy {
+  ContentScope content = 1;
+  uint32 latest_n = 2;
+  Cadence cadence = 3;
+  uint32 every_n_rounds = 4;
+  bool include_system_prompt = 5;
+  bool include_tool_results = 6;
+}
+
+message PolicyScope {
+  string tenant_id = 1;
+  string workspace_id = 2;
+}
+
+message GetCheckPolicyRequest {}
+
+message GetCheckPolicyResponse {
+  // One policy per hook.
+  CheckPolicy llm_call = 1;
+  CheckPolicy filter_tools = 2;
+  CheckPolicy tool_call = 3;
+}
+
+message CheckLLMCallRequest {
+  PolicyScope scope = 1;
+  string agent_id = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  uint32 round = 5;
+  string provider_id = 6;
+  string provider_type = 7;
+  string model = 8;
+  PolicyPurpose purpose = 9;
+  bool read_only = 10;
+  repeated Message messages = 11;
+}
+
+message CheckLLMCallResponse {
+  Decision decision = 1;
+  string reason = 2;
+  string user_message = 3;
+  optional CheckPolicy policy_override = 4;
+}
+
+message FilterToolsRequest {
+  PolicyScope scope = 1;
+  string agent_id = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  uint32 round = 5;
+  string provider_id = 6;
+  string provider_type = 7;
+  string model = 8;
+  PolicyPurpose purpose = 9;
+  bool read_only = 10;
+  repeated Message messages = 11;
+  repeated ToolDefinition tools = 12;
+}
+
+message FilterToolsResponse {
+  Decision decision = 1;
+  repeated string allowed_tool_names = 2;
+  string reason = 3;
+  optional CheckPolicy policy_override = 4;
+}
+
+message CheckToolCallRequest {
+  PolicyScope scope = 1;
+  string agent_id = 2;
+  string session_id = 3;
+  string turn_id = 4;
+  uint32 round = 5;
+  string provider_id = 6;
+  string provider_type = 7;
+  string model = 8;
+  PolicyPurpose purpose = 9;
+  bool read_only = 10;
+  string tool_call_id = 11;
+  string name = 12;
+  string arguments_json = 13;
+  ToolDefinition tool = 14;
+  bool mutation = 15;
+  bool delegated = 16;
+  string assistant_text = 17;
+  PolicyEntryPath entry_path = 18;
+  repeated Message messages = 19;
+}
+
+message CheckToolCallResponse {
+  Decision decision = 1;
+  string reason = 2;
+  string user_message = 3;
+  string replacement_tool_result = 4;
+  optional CheckPolicy policy_override = 5;
+}

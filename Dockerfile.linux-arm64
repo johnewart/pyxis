@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+# Linux arm64 llmd with CGO (sqlite). Build from repo root:
+#   docker buildx build --platform linux/arm64 -f Dockerfile.linux-arm64 -o type=local,dest=. .
+# Or: make -C llmd build-linux-arm64
+#
+# amd64: see Dockerfile.linux-amd64 (same pattern).
+
+FROM --platform=linux/arm64 golang:bookworm AS builder
+
+ENV GOTOOLCHAIN=auto
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    gcc \
+    libsqlite3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src/llmd
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . /src/llmd
+
+WORKDIR /src/llmd
+
+RUN go mod tidy \
+  && CGO_ENABLED=1 go build -trimpath -ldflags='-s -w' -o llmd-linux-arm64 ./cmd/llmd
+
+FROM scratch
+COPY --from=builder /src/llmd/llmd-linux-arm64 /llmd-linux-arm64

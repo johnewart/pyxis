@@ -1,0 +1,48 @@
+{
+  "name": "@pyxis-llm/core",
+  "version": "9999999.1791346824.0",
+  "description": "Pure TypeScript domain types and wire-contract helpers for Pyxis, with no transport or host framework dependencies.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnewart/pyxis.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/johnewart/pyxis/tree/main/packages/core#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "node ../../scripts/build-dist.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
+    "@pyxis-llm/client": "file:../client",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,26 @@
+# Pure-Go proto codegen path (no protoc / no make required), mirroring
+# scripts/regen-index-proto.sh's protoc flags (--go_out=gen,
+# paths=source_relative). Run from the repo root:
+#   npx --no-install buf generate llmd/proto --template llmd/buf.gen.yaml
+# Output lands at llmd/gen/<pkg>/*.pb.go, matching the module's import paths.
+# The same command also writes Python output (*_pb2.py, *_pb2_grpc.py, *_pb2.pyi)
+# to llmd/packages/python-client/src/pyxis_client/gen. The grpc plugin emits
+# top-level sibling imports in *_pb2_grpc.py; after generating, rewrite them to
+# relative form (`from . import <name>_pb2 as ...`) so the package imports cleanly.
+version: v2
+plugins:
+  - local: ["go", "run", "google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11"]
+    out: llmd/gen
+    opt:
+      - paths=source_relative
+  - local: ["go", "run", "google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1"]
+    out: llmd/gen
+    opt:
+      - paths=source_relative
+  # Python outputs (generated only; handwritten helpers live outside this dir).
+  - remote: buf.build/protocolbuffers/python
+    out: llmd/packages/python-client/src/pyxis_client/gen
+  - remote: buf.build/protocolbuffers/pyi
+    out: llmd/packages/python-client/src/pyxis_client/gen
+  - remote: buf.build/grpc/python
+    out: llmd/packages/python-client/src/pyxis_client/gen

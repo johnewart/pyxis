@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "CANONICAL list of Claude Code base models. Single source of truth for both",
+    "languages: Go embeds this file directly (claude_base_models.go), and a",
+    "consuming app can generate its own TS constants from it.",
+    "",
+    "The Claude Code CLI has no list-models API, so these aliases ARE the provider",
+    "catalog. To add a model tier, edit ONLY this file.",
+    "",
+    "Array order defines catalog order and picker sort order.",
+    "pinnedIds are exact CLI model ids offered alongside the moving alias."
+  ],
+  "baseModels": [
+    {
+      "alias": "sonnet",
+      "label": "Sonnet",
+      "pinnedIds": ["claude-sonnet-4-5-20250929", "claude-sonnet-4"]
+    },
+    {
+      "alias": "opus",
+      "label": "Opus",
+      "pinnedIds": ["claude-opus-4-5-20251101"]
+    },
+    {
+      "alias": "haiku",
+      "label": "Haiku",
+      "pinnedIds": ["claude-haiku-4-5-20251001"]
+    },
+    {
+      "alias": "fable",
+      "label": "Fable",
+      "pinnedIds": ["claude-fable-5"]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+/llmd
+cmd/llmd/llmd
+llmd-linux-amd64
+llmd-linux-arm64
+llmd.exe
+llmd-e2e-bin
+*.sqlite*
+# go.work itself IS committed (see its header); go.work.sum is a generated
+# lockfile whose contents depend on which modules a given workspace resolved.
+go.work.sum
+providers.yaml
+tmp
+node_modules
+dist
+# Staging and swap directories of scripts/build-dist.mjs.
+dist.next
+dist.old
+.vite
+# Build-time copies of shared type modules, vendored into @pyxis-llm/react by
+# scripts/vendor-shared-types.mjs so its published npm package doesn't need a
+# hard dependency on a client package — see that script's header comment.
+packages/*/src/vendor/
+llmd-embed-example
+# Scratch notes kept next to the checkout, not part of the project.
+llmd-followups.md
+# Generated e2e timing report (read by e2e-timing.cjs); holds local paths.
+packages/react/e2e/e2e-timing.json

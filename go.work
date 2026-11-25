@@ -1,0 +1,29 @@
+// go.work makes the three modules in this repo resolve against each other from
+// the local checkout during development, without a replace directive in each
+// go.mod deciding it for every consumer.
+//
+// Replace directives are a PUBLISHED property of a module: anyone requiring
+// github.com/johnewart/pyxis inherits the constraint. A workspace file affects
+// only builds that see it, which is why it, not replace, is the right tool for
+// "build against my checkout".
+//
+// This file IS committed: every path it names is inside this repo, so it means
+// the same thing for everyone. A cross-repo workspace (below) should not be.
+//
+// The replace lines in cmd/llmd/go.mod and examples/embed/go.mod are still
+// there on purpose: both are unpublished modules that must build standalone in
+// CI, where go.work may be absent (and where GOWORK=off is a reasonable thing
+// for a build to set).
+//
+// For multi-repo work — llmd alongside a consuming application — create an
+// UNCOMMITTED go.work ABOVE both checkouts listing the module directories from
+// each, rather than adding cross-repo replace directives here. That file is
+// specific to one developer's directory layout, which is exactly why it does not
+// belong in either repo.
+go 1.26.0
+
+use (
+	.
+	./cmd/llmd
+	./examples/embed
+)

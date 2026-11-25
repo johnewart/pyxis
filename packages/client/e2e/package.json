@@ -1,0 +1,20 @@
+{
+  "name": "@pyxis-llm/client-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests driving a real llmd binary through @pyxis-llm/client, the way host apps do.",
+  "type": "module",
+  "scripts": {
+    "build:llmd": "node scripts/build-llmd.mjs",
+    "test": "npm run build:llmd && vitest run"
+  },
+  "dependencies": {
+    "@pyxis-llm/client": "file:..",
+    "@pyxis-llm/core": "file:../../core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

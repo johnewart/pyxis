@@ -1,0 +1,122 @@
+{
+  "name": "@pyxis-llm/react",
+  "version": "9999999.1791346824.0",
+  "description": "Reusable React chat/markdown-rendering components shared across Pyxis-consuming apps (host apps), built on @pyxis-llm/core and Mantine.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnewart/pyxis.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/johnewart/pyxis/tree/main/packages/react#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./highlight": {
+      "types": "./dist/highlight.d.ts",
+      "import": "./dist/highlight.js"
+    },
+    "./mermaid": {
+      "types": "./dist/mermaid.d.ts",
+      "import": "./dist/mermaid.js"
+    },
+    "./charts": {
+      "types": "./dist/charts.d.ts",
+      "import": "./dist/charts.js"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "files": [
+    "dist",
+    "styles.css"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "vendor": "node ../../scripts/vendor-shared-types.mjs packages/react",
+    "build": "npm run vendor && node ../../scripts/build-dist.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@pyxis-llm/client": ">=0.1.0",
+    "@mantine/core": ">=7",
+    "@mantine/hooks": ">=7",
+    "@mermaid-js/layout-elk": ">=0.1.7",
+    "mermaid": ">=11.4.0",
+    "react": ">=18",
+    "react-dom": ">=18",
+    "react-markdown": ">=9.0.1",
+    "react-syntax-highlighter": ">=15.6.1",
+    "remark-gfm": ">=4.0.0",
+    "vega": ">=6.4.0",
+    "vega-embed": ">=7.3.0",
+    "vega-lite": ">=6.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@pyxis-llm/client": {
+      "optional": true
+    },
+    "@mermaid-js/layout-elk": {
+      "optional": true
+    },
+    "mermaid": {
+      "optional": true
+    },
+    "react-syntax-highlighter": {
+      "optional": true
+    },
+    "vega": {
+      "optional": true
+    },
+    "vega-embed": {
+      "optional": true
+    },
+    "vega-lite": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@pyxis-llm/core": "file:../core",
+    "@tabler/icons-react": "^3.30.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@pyxis-llm/client": "file:../client",
+    "@mantine/core": "^7.15.0",
+    "@mantine/hooks": "^7.15.0",
+    "@mermaid-js/layout-elk": "^0.1.7",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/turndown": "^5.0.5",
+    "mermaid": "^11.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "react-syntax-highlighter": "^15.6.1",
+    "remark-gfm": "^4.0.0",
+    "typescript": "^5.7.3",
+    "vega": "^6.4.0",
+    "vega-embed": "^7.3.0",
+    "vega-lite": "^6.5.0"
+  }
+}

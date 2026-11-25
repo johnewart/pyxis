@@ -1,0 +1,56 @@
+# Build-context excludes for when THIS checkout is a Docker build context root.
+#
+# That is the case for an outside image that embeds llmd and passes this
+# checkout in as a named context (`docker build --build-context llmd=../llmd`).
+# BuildKit honours a named context's own .dockerignore, and what is listed here is never sent to the
+# builder at all — unlike `COPY --exclude`, which filters only after the whole
+# directory (node_modules included, ~800 MB) has been transferred.
+#
+# llmd's own Dockerfile.linux-* build from the PARENT directory
+# (`cd .. && docker buildx build -f llmd/Dockerfile.linux-amd64 .`), so this file
+# does not apply to them.
+#
+# Such an image takes two things from here: the Go module (compiled into the
+# host binary via a go.mod replace) and packages/{client,core,react} INCLUDING
+# their built dist/ (npm-packed into its web build). Do not exclude dist, and do
+# not exclude anything a non-test //go:embed reads: cmd/llmd/debugserver/assets/,
+# internal/knowledge/db/migrations/*.sql,
+# internal/llm/claudecode/claude_base_models.json.
+
+# VCS and CI
+.git
+.github
+
+# JS dependencies — the image installs its own.
+**/node_modules
+
+# Working state that changes on its own (editor and agent tooling writes
+# .konstruct*; sqlite changes whenever anything opens it). Left in, these bust the image's Go layers.
+**/.konstruct*
+**/*.sqlite
+**/*.sqlite-*
+
+# Caches, reports, docs, fixtures — read by no build stage.
+.vite
+e2e-reports
+**/e2e
+docs
+**/testdata
+tmp
+*.out
+*.log
+
+# Host-built binaries (see .gitignore) — the image builds its own. `**/` because
+# unlike .gitignore, a .dockerignore pattern is anchored at the context root:
+# a bare `llmd-embed-example` missed examples/embed/llmd-embed-example, which
+# alone was tens of MB per transfer.
+/llmd
+cmd/llmd/llmd
+**/llmd-linux-*
+**/llmd.exe
+**/llmd-e2e-bin
+**/llmd-embed-example
+
+# Local config that may hold credentials, and scratch notes.
+providers.yaml
+llmd-followups.md

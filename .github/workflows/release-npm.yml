@@ -1,0 +1,198 @@
+name: release-npm
+
+# Builds the llmd daemon binary for every supported platform, stages each
+# into its @pyxis-llm/cli-<os>-<arch> package, and publishes all @pyxis-llm/* packages
+# publicly to the npm registry (registry.npmjs.org, scope @pyxis-llm), using the
+# NPM_TOKEN repository secret.
+#
+# Trigger: publishing a GitHub Release (tag name, e.g. v1.2.3, becomes the
+# published npm version — leading "v" stripped) or a manual dispatch with an
+# explicit version input. scripts/set-npm-versions.mjs keeps @pyxis-llm/core, 
+# @pyxis-llm/client, and all four @pyxis-llm/cli-<os>-<arch> versions in lockstep —
+# npm requires the exact optionalDependencies-pinned version to exist on the
+# registry.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "npm version to publish (e.g. 1.2.3); leave empty to reuse the current tag"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            pkg: cli-linux-x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            pkg: cli-linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Toolchain (CGO)
+        run: sudo apt-get update && sudo apt-get install -y build-essential protobuf-compiler
+      - name: Build
+        run: make build-linux-${{ matrix.arch }}-native
+      - name: Stage binary
+        run: |
+          mkdir -p packages/${{ matrix.pkg }}/bin
+          cp llmd-linux-${{ matrix.arch }} packages/${{ matrix.pkg }}/bin/llmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}
+          path: packages/${{ matrix.pkg }}/bin/llmd
+
+  build-macos:
+    runs-on: macos-14 # Apple Silicon (arm64) runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Toolchain
+        run: brew install protobuf
+      - name: Build
+        run: make build
+      - name: Stage binary
+        run: |
+          mkdir -p packages/cli-darwin-arm64/bin
+          cp llmd packages/cli-darwin-arm64/bin/llmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-darwin-arm64
+          path: packages/cli-darwin-arm64/bin/llmd
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Toolchain (MSYS2 MinGW-w64 + SQLite)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-sqlite mingw-w64-x86_64-protobuf
+      - name: Build
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          ./build-windows.ps1
+      - name: Stage binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path packages/cli-win32-x64/bin
+          Copy-Item llmd-windows-amd64.exe packages/cli-win32-x64/bin/llmd.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-win32-x64
+          path: packages/cli-win32-x64/bin/llmd.exe
+
+  publish:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@pyxis-llm"
+
+      - name: Set npm package versions from release tag
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            node scripts/set-npm-versions.mjs --tag "${{ inputs.version }}"
+          else
+            node scripts/set-npm-versions.mjs --tag "${{ github.event.release.tag_name }}"
+          fi
+
+      - name: Refuse to publish the dev sentinel version
+        run: node scripts/check-npm-dev-version.mjs
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-linux-x64
+          path: packages/cli-linux-x64/bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-linux-arm64
+          path: packages/cli-linux-arm64/bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-darwin-arm64
+          path: packages/cli-darwin-arm64/bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-win32-x64
+          path: packages/cli-win32-x64/bin
+
+      - name: chmod +x non-Windows binaries
+        run: |
+          chmod +x packages/cli-linux-x64/bin/llmd
+          chmod +x packages/cli-linux-arm64/bin/llmd
+          chmod +x packages/cli-darwin-arm64/bin/llmd
+
+      - name: Publish platform binary packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in cli-linux-x64 cli-linux-arm64 cli-darwin-arm64 cli-win32-x64; do
+            npm publish packages/$pkg --access public
+          done
+
+      - name: Install client/core workspace deps and build
+        working-directory: packages/client
+        run: npm install
+
+      - name: Build @pyxis-llm/client
+        working-directory: packages/client
+        run: npm run build
+
+      - name: Publish @pyxis-llm/client
+        working-directory: packages/client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Install @pyxis-llm/core deps
+        working-directory: packages/core
+        run: npm install
+
+      - name: Build @pyxis-llm/core
+        working-directory: packages/core
+        run: npm run build
+
+      - name: Publish @pyxis-llm/core
+        working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+      - name: Install @pyxis-llm/react deps
+        working-directory: packages/react
+        run: npm install
+
+      - name: Build @pyxis-llm/react
+        working-directory: packages/react
+        run: npm run build
+
+      - name: Publish @pyxis-llm/react
+        working-directory: packages/react
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

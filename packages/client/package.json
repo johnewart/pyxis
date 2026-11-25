@@ -1,0 +1,81 @@
+{
+  "name": "@pyxis-llm/client",
+  "version": "9999999.1791346824.0",
+  "description": "TypeScript client for Pyxis (LlmService) with an ai-library-shaped LLM surface. One API, two transports: import ./node for native gRPC (HTTP/2) or ./web for Connect/gRPC-Web over fetch.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnewart/pyxis.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/johnewart/pyxis/tree/main/packages/client#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "import": "./dist/web.js"
+    },
+    "./gen/llmv1/llm_pb.js": {
+      "types": "./dist/gen/llmv1/llm_pb.d.ts",
+      "import": "./dist/gen/llmv1/llm_pb.js"
+    },
+    "./gen/mcpproxy/v1/mcpproxy_pb.js": {
+      "types": "./dist/gen/mcpproxy/v1/mcpproxy_pb.d.ts",
+      "import": "./dist/gen/mcpproxy/v1/mcpproxy_pb.js"
+    },
+    "./gen/knowledge/v1/knowledge_pb.js": {
+      "types": "./dist/gen/knowledge/v1/knowledge_pb.d.ts",
+      "import": "./dist/gen/knowledge/v1/knowledge_pb.js"
+    },
+    "./gen/llamacpp/v1/llamacpp_pb.js": {
+      "types": "./dist/gen/llamacpp/v1/llamacpp_pb.d.ts",
+      "import": "./dist/gen/llamacpp/v1/llamacpp_pb.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src/gen"
+  ],
+  "scripts": {
+    "proto:gen": "node scripts/proto-gen.mjs",
+    "ensure-deps": "node -e \"try{require.resolve('@connectrpc/connect')}catch{require('child_process').execSync('npm install',{stdio:'inherit'})}\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build:ts": "npm run ensure-deps && node ../../scripts/build-dist.mjs",
+    "build": "npm run proto:gen && npm run build:ts",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-node": "^2.2.0",
+    "@connectrpc/connect-web": "^2.2.0",
+    "zod": "^4.3.6"
+  },
+  "config": {
+    "protocVersion": "29.2"
+  },
+  "devDependencies": {
+    "@bufbuild/protoc-gen-es": "^2.15.0",
+    "@protobuf-ts/protoc": "^2.11.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

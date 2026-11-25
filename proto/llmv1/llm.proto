@@ -1,0 +1,3005 @@
+syntax = "proto3";
+
+package llm.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/johnewart/pyxis/gen/llmv1;llmv1";
+
+// LLM API: unary chat/generate plus server-streaming chat with conversation events
+// (aligned with ai-library TypeScript conversation_events + stream_types).
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  // JSON object encoding tool arguments (e.g. "{\"location\":\"SF\"}").
+  string arguments_json = 3;
+  // Gemini 3+ requires thought_signature on functionCall parts when replaying tool history.
+  bytes thought_signature = 4;
+}
+
+// UI/session artifact attached to a chat message (ask cards, embedded sessions,
+// etc.). payload_json is client-facing display data and is NEVER sent to LLM
+// providers. content is the OPPOSITE audience: when non-empty, llmd splices it
+// verbatim into the outbound message sent to the provider (same mechanism as
+// TrackedDocument injection) while the persisted message row itself is never
+// mutated — so replaying history to a client never needs to strip anything.
+// The two fields may both be set (e.g. an ask_card_response shows a structured
+// answer to the client via payload_json while a synthesized natural-language
+// summary rides in content for the model).
+message MessageAttachment {
+  string id = 1;
+  string kind = 2;
+  string payload_json = 3;
+  // When set, UI inserts the hydrated artifact after this tool result within the parent turn.
+  optional string after_tool_call_id = 4;
+  // Provider-facing text, spliced into the outbound message at send-time.
+  // Empty ⇒ this attachment is display-only (existing behavior, unchanged).
+  string content = 5;
+}
+
+// AskCard / AskCardResponse are first-class llmd conversational vocabulary —
+// a generic structured-question primitive (distinct from app-owned domain
+// data like graph provenance, which stays a TurnDecoration pointer). llmd
+// does not interpret these itself; they are typed shapes clients marshal into
+// MessageAttachment.payload_json (via protojson) so every llmd-based app
+// shares one canonical ask-card shape instead of reinventing the JSON
+// contract. The response's card_id correlates it back to the AskCard it
+// answers.
+enum AskCardType {
+  ASK_CARD_TYPE_UNSPECIFIED = 0;
+  ASK_CARD_TYPE_CHOICE = 1;
+  ASK_CARD_TYPE_TEXT = 2;
+  ASK_CARD_TYPE_FILE = 3;
+}
+
+message AskChoiceCard {
+  // Option labels. Always set (also when options is), so older clients work.
+  repeated string choices = 1;
+  // false = single-select (radio), true = multi-select (checkboxes).
+  bool allow_multiple = 2;
+  // Optional per-option explanations, same order as choices.
+  repeated AskChoiceOption options = 3;
+}
+
+message AskChoiceOption {
+  string label = 1;
+  // One line: what happens if the user picks this option.
+  string description = 2;
+  // Non-empty marks the option as recommended and says why. At most one
+  // option on a card carries it.
+  string recommendation = 3;
+}
+
+message AskFileCard {
+  // Advisory only (client-side hint); empty = any file type accepted.
+  repeated string accepted_mime_types = 1;
+}
+
+message AskCard {
+  string id = 1;
+  string title = 2;
+  string text = 3;
+  AskCardType type = 4;
+  // When true, the client also offers a free-text field alongside the
+  // primary answer (choice/file), independent of type = TEXT.
+  bool allow_additional_text = 5;
+  oneof body {
+    AskChoiceCard choice = 6;
+    AskFileCard file = 7;
+    // TEXT needs no body — title/text carries the whole question.
+  }
+}
+
+message AskChoiceResponse {
+  repeated string selected = 1;
+}
+
+message AskFileResponse {
+  string file_name = 1;
+  string mime_type = 2;
+  int64 size_bytes = 3;
+  // Raw file bytes. protojson encodes/decodes this as base64 automatically —
+  // no manual base64 handling needed at the client/server boundary.
+  bytes content = 4;
+}
+
+message AskCardResponse {
+  // Correlator: the AskCard.id being answered.
+  string card_id = 1;
+  AskCardType type = 2;
+  string additional_text = 3;
+  oneof body {
+    AskChoiceResponse choice = 4;
+    AskFileResponse file = 5;
+  }
+}
+
+// A tracked document attached to a turn: the full CURRENT body (frontmatter
+// included) of a plan/design/idea etc. as of when the user sent the message.
+// llmd hash-dedups these into immutable version snapshots and injects them into
+// the OUTBOUND model messages at send time; the persisted user message stays
+// exactly what the user typed. document_id is the document's stable identity
+// across turns (docUuid, or a review id) and is opaque to llmd.
+message TrackedDocument {
+  string document_id = 1;
+  string name = 2;
+  string content = 3;
+}
+
+message Message {
+  // "system" | "user" | "assistant" | "tool"
+  string role = 1;
+  // User-visible message body (never raw <thinking>…</thinking> regions).
+  string content = 2;
+  string id = 3;
+  repeated ToolCall tool_calls = 4;
+  // For role "tool": id of the tool_use block this result answers.
+  string tool_call_id = 5;
+  // Model reasoning / chain-of-thought for role "assistant" (optional).
+  // Same turn as content and tool_calls; not shown as the main answer in UI.
+  // History replay: OpenAI-compatible APIs may map this to reasoning_content where supported;
+  // Ollama and other single-string assistants omit this field (content only).
+  string thinking_content = 6;
+  // User-facing activity headline for this assistant turn (optional). Not chain-of-thought; may be
+  // sourced from <activity>...</activity> during streaming and persisted for replay / debugging.
+  string activity_headline = 7;
+  repeated MessageAttachment attachments = 8;
+  // Per-turn token usage (populated for assistant messages when history is loaded with usage data).
+  optional TokenUsage usage = 9;
+  // Completion status for an assistant turn (e.g. "end_turn", "tool_use", "stop", "cancelled").
+  // Optional; empty for user/system/tool messages. Persisted on the assistant content row.
+  string finish_reason = 10;
+  // Wall time, in ms, of the one model call that produced this assistant message
+  // (one round of the tool loop). Unset when it was not recorded (older turns).
+  optional int64 model_duration_ms = 11;
+}
+
+// Cross-provider cache hints. Each backend maps only what it supports (e.g.
+// Anthropic prompt caching); others ignore unused fields.
+message CacheOptions {
+  // Reuse of large/static prompt segments where the provider has a mechanism.
+  enum PromptCacheMode {
+    PROMPT_CACHE_MODE_UNSPECIFIED = 0;
+    PROMPT_CACHE_MODE_DISABLED = 1;
+    PROMPT_CACHE_MODE_SHORT_TTL = 2;
+    PROMPT_CACHE_MODE_LONG_TTL = 3;
+  }
+  PromptCacheMode prompt_cache_mode = 1;
+}
+
+// Per-turn Claude Code CLI overrides (client model profiles).
+message ClaudeCodeCallOptions {
+  // "low" | "medium" | "high" | "xhigh" | "max"
+  optional string effort = 1;
+  optional double max_budget_usd = 2;
+  // When set, passed to --model instead of CallOptions.model (catalog profile id vs base model id).
+  optional string base_model = 3;
+  // "enabled" | "disabled" | "adaptive" — overrides provider thinking when set.
+  optional string thinking_type = 4;
+  optional int32 thinking_budget_tokens = 5;
+}
+
+// Per-turn OpenRouter routing overrides.
+message OpenRouterCallOptions {
+  enum Sort {
+    SORT_UNSPECIFIED = 0;
+    SORT_PRICE = 1;
+    SORT_THROUGHPUT = 2;
+    SORT_LATENCY = 3;
+  }
+  Sort sort = 1;
+  // Preferred upstream provider names, in order.
+  repeated string order = 2;
+  // Restrict routing to only these upstream providers.
+  repeated string only = 3;
+  // Upstream providers to skip.
+  repeated string ignore = 4;
+  // Whether OpenRouter may fall back to other upstream providers.
+  optional bool allow_fallbacks = 5;
+}
+
+// Structured responses: ask the provider to emit machine-readable output
+// instead of prose the caller has to scrape.
+//
+// Backends map this to whatever they support and IGNORE it otherwise, the same
+// contract as CacheOptions. This is a best-effort hint, never a guarantee:
+//   - openai   -> response_format json_schema / json_object
+//   - gemini   -> response_mime_type + response_schema
+//   - ollama   -> format
+//   - anthropic/bedrock -> no JSON mode; equivalent is forcing a single tool call
+//   - claudecode/cursorcli -> CLI-driven, cannot express this at all
+// Callers MUST still tolerate non-conforming output (prose, fenced JSON, a
+// trailing remark) rather than assuming the field was honoured.
+message ResponseFormat {
+  enum Kind {
+    // No constraint — ordinary free-text completion.
+    RESPONSE_FORMAT_KIND_UNSPECIFIED = 0;
+    // Any syntactically valid JSON object; shape is up to the prompt.
+    RESPONSE_FORMAT_KIND_JSON_OBJECT = 1;
+    // Must conform to json_schema. Backends without schema support fall back to
+    // JSON_OBJECT behaviour rather than failing the call.
+    RESPONSE_FORMAT_KIND_JSON_SCHEMA = 2;
+  }
+  Kind kind = 1;
+  // JSON Schema (draft 2020-12) encoded as a JSON string. Required when kind is
+  // JSON_SCHEMA; ignored otherwise. A string rather than google.protobuf.Struct
+  // so callers can pass a schema through verbatim without a lossy round trip.
+  string json_schema = 2;
+  // Schema name, for providers that require one (OpenAI). Defaults server-side
+  // when empty.
+  string schema_name = 3;
+  // Ask the provider to reject non-conforming output where it can (OpenAI
+  // strict mode). Advisory: backends without the capability ignore it.
+  bool strict = 4;
+}
+
+message CallOptions {
+  // Overrides server default model when set.
+  string model = 1;
+  int32 max_tokens = 2;
+  optional float temperature = 3;
+  optional float top_p = 4;
+  optional int64 top_k = 5;
+
+  CacheOptions cache_options = 6;
+  // Max provider rounds that include tool calls before stopping (0 = server default, e.g. 16).
+  optional int32 max_tool_rounds = 7;
+  // When true, this Chat/ChatStream turn must not mutate scope state (query tools only).
+  optional bool read_only = 8;
+  ClaudeCodeCallOptions claude_code = 9;
+  // Structured-output request for this turn. Applies to Chat, ChatStream and
+  // GenerateOnce so one-shot utilities and agent turns share one mechanism.
+  ResponseFormat response_format = 10;
+  // Overrides the session's bound LLM provider for this turn, when set and
+  // non-empty. ChatStream compares this (and model, above) against the
+  // session's current binding and reconciles automatically — persisting the
+  // new provider/model onto the session and running the same stateful/
+  // non-stateful history reconciliation UpdateSessionLlm triggers — so a
+  // caller changing models mid-conversation does not need a separate
+  // EnsureSession/UpdateSessionLlm round trip first. Empty means "keep the
+  // session's current provider".
+  optional string provider_id = 11;
+  // Controls whether and which tool the model must call this turn. Unset or
+  // UNSPECIFIED behaves exactly like AUTO.
+  ToolChoice tool_choice = 12;
+  OpenRouterCallOptions openrouter = 13;
+  // Per-attempt provider call timeout in milliseconds (0 or unset = server
+  // default).
+  optional int32 attempt_timeout_ms = 14;
+  // Max provider call attempts including the first (0 or unset = server
+  // default).
+  optional int32 max_attempts = 15;
+  // When enabled, the last allowed tool round sends no tools and appends
+  // the instruction as a transient user message.
+  FinalRoundOptions final_round = 16;
+  // How tool-call-like text emitted in assistant content is handled.
+  // Unspecified behaves exactly like STRIP.
+  TextToolCallMode text_tool_call_mode = 17;
+}
+
+enum TextToolCallMode {
+  // Same as STRIP.
+  TEXT_TOOL_CALL_MODE_UNSPECIFIED = 0;
+  // Remove text-form tool calls from assistant content.
+  TEXT_TOOL_CALL_MODE_STRIP = 1;
+  // Convert text-form tool calls in assistant content into structured
+  // (real) tool calls.
+  TEXT_TOOL_CALL_MODE_CONVERT = 2;
+}
+
+// Configures the final-round behavior of a turn. When enabled, the last
+// allowed round sends no tools and appends instruction as a transient user
+// message (not persisted to history).
+message FinalRoundOptions {
+  // Turns the final-round behavior on.
+  bool enabled = 1;
+  // Text appended as a transient user message on the final round.
+  string instruction = 2;
+}
+
+// Constrains tool selection for a turn. Backends map this to their native
+// tool-choice setting.
+message ToolChoice {
+  enum Mode {
+    // Same as AUTO.
+    MODE_UNSPECIFIED = 0;
+    // Model decides whether to call a tool.
+    MODE_AUTO = 1;
+    // Model must not call any tool.
+    MODE_NONE = 2;
+    // Model must call at least one tool (any of the supplied tools).
+    MODE_REQUIRED = 3;
+    // Model must call the tool given in name.
+    MODE_NAMED = 4;
+  }
+  Mode mode = 1;
+  // Tool name. Required when mode is NAMED and must match a supplied tool;
+  // ignored otherwise.
+  string tool_name = 2;
+}
+
+// Stateless one-shot generation: no agent, no session, no persistence. The
+// caller supplies the provider explicitly (model via options.model). Used by
+// utility one-shots (provider setup-wizard probe, plan/design summaries) that
+// have an explicit provider/model but no chat session. Enabled-model validation
+// is intentionally skipped so onboarding can probe a not-yet-enabled model.
+message GenerateOnceRequest {
+  string system_prompt = 1;
+  string prompt = 2;
+  CallOptions options = 3;
+  // Provider to run against; falls back to the server default when empty. The
+  // model comes from options.model (falls back to the provider's default_model).
+  optional string provider_id = 4;
+  // Optional multi-part user message. Mutually exclusive with prompt (setting
+  // both is InvalidArgument). Parts may mark cache breakpoints.
+  repeated PromptPart prompt_parts = 5;
+}
+
+// One part of a multi-part user prompt.
+message PromptPart {
+  string text = 1;
+  // Ask providers that support prompt caching to cache the prompt up to and
+  // including this part.
+  bool cache_breakpoint = 2;
+}
+
+// Stateless completion request used by Complete and CompleteStream.
+message CompleteRequest {
+  // Conversation so far. Messages may include assistant messages carrying
+  // tool_calls and role=tool messages carrying tool results.
+  repeated Message messages = 1;
+  CallOptions options = 2;
+  // Provider to run against; falls back to the server default when empty.
+  string provider_id = 3;
+  // Optional tool definitions the model may call. ToolDefinitions carry no
+  // execution binding: calls are returned to the caller and never run by llmd.
+  repeated ToolDefinition tools = 4;
+  // Optional system prompt.
+  optional string system = 5;
+}
+
+message CompleteResponse {
+  AssistantReply reply = 1;
+}
+
+// One frame of a CompleteStream. A dedicated oneof is used instead of reusing
+// ConversationStreamFrame because that message is tied to sessions and
+// persisted conversation state, which stateless completions do not have.
+message CompleteStreamResponse {
+  oneof frame {
+    // Incremental assistant text.
+    string content_delta = 1;
+    // Incremental thinking text.
+    string thinking_delta = 2;
+    // A tool call requested by the model; returned, never executed.
+    ToolCall tool_call = 3;
+    // Last frame: full reply including tool calls and token usage.
+    AssistantReply final_reply = 4;
+  }
+}
+
+message AssistantReply {
+  // Final user-visible assistant text for this turn.
+  string content = 1;
+  string id = 2;
+  repeated ToolCall tool_calls = 3;
+  string finish_reason = 4;
+  // Accumulated thinking / reasoning for this turn (same id as content).
+  string thinking_content = 5;
+  // Latest user-facing activity headline for this turn when the provider emits status snapshots.
+  string activity_headline = 6;
+  TokenUsage usage = 7;
+  // Upstream provider that actually served the request (e.g. via OpenRouter); empty when unknown.
+  string served_by = 8;
+}
+
+// Server-side or built-in tools executed inside llmd's process (handlers
+// installed via llmdhost.Config.Tools / llmdtools). Tools served by another
+// process or module use ToolExecutionExecutor instead.
+message ToolExecutionInlineBuiltin {}
+
+// llmd POSTs JSON to url; response body is the tool result (UTF-8 text or JSON stringified by caller).
+//
+// Typed result (opt-in): a 2xx response whose Content-Type media type is
+// application/json (parameters such as charset are ignored) and whose body is
+// exactly a JSON object {"content": string, "is_error": bool, "ends_turn":
+// bool} is treated as typed. "content" is required and becomes the tool
+// result; is_error=true marks the call failed; ends_turn=true on a successful
+// call asks the server to end the turn after the current tool round. Unknown
+// fields, a missing content, trailing data, or another Content-Type make the
+// body NOT typed: the raw body is then the result and the call succeeds, as
+// before. Non-2xx responses are always failures.
+message ToolExecutionHttpWebhook {
+  string url = 1;
+  // 0 = server default timeout for webhook tools.
+  int32 timeout_seconds = 2;
+  optional string bearer_token = 3;
+  // If set, hex-encoded HMAC-SHA256 of the raw JSON body, sent as X-Llmd-Signature.
+  optional string hmac_secret = 4;
+}
+
+// Client runs the tool; llmd blocks until the result arrives (or timeout).
+// Results come back either via unary SubmitToolResults (ChatStream clients) or,
+// when a legacy ToolProviderHello stream is connected for the exact
+// (tenant, scope), as ToolExecutionInvoke/ToolExecutionResult frames on
+// ToolProviderService.Connect. For host-served tools prefer ToolExecutionExecutor.
+message ToolExecutionDelegateToClient {
+  // 0 = server default wait for the client (e.g. 120 seconds).
+  int32 timeout_seconds = 1;
+}
+
+enum ToolClassification {
+  TOOL_CLASSIFICATION_UNSPECIFIED = 0;
+  TOOL_CLASSIFICATION_QUERY = 1;
+  TOOL_CLASSIFICATION_MUTATION = 2;
+}
+
+// Declares a callable tool the model may use (JSON Schema for arguments).
+// parameters_schema_json should be a JSON object with at least
+// "type": "object" and "properties" (OpenAI-style / JSON Schema draft subset).
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  string parameters_schema_json = 3;
+  oneof execution {
+    ToolExecutionInlineBuiltin inline_builtin = 10;
+    ToolExecutionHttpWebhook http_webhook = 11;
+    ToolExecutionDelegateToClient delegate_to_client = 12;
+    ToolExecutionExecutor executor = 14;
+  }
+  ToolClassification classification = 13;
+  // Execution order hint: lower runs first; unset means default. Affects
+  // execution order only, not transcript order.
+  optional int32 priority = 15;
+}
+
+// Execution binding: the tool runs on a connected executor (ToolProviderService
+// stream that sent ExecutorHello) identified by executor_id.
+message ToolExecutionExecutor {
+  string executor_id = 1;
+  // Upper bound on a single call; 0 ⇒ server default.
+  uint32 max_duration_seconds = 2;
+}
+
+// --- Session-scoped chat runtime (client chat) ---
+
+// What an UNLISTED server-wide tool means for a session.
+//
+// A purely subtractive model cannot express an allowlist: a profile that wants
+// exactly read_code would have to enumerate every other tool as disabled, and
+// any tool registered server-wide AFTERWARDS would be silently gained by every
+// session configured before it. PROFILE_ONLY closes that by making silence mean
+// no.
+enum ToolPolicy {
+  // Treated as INHERIT_SERVER_WIDE: an unset policy must not change the
+  // behaviour of a caller written before this field existed.
+  TOOL_POLICY_UNSPECIFIED = 0;
+  // Every server-wide tool is visible unless named in disabled_tools.
+  TOOL_POLICY_INHERIT_SERVER_WIDE = 1;
+  // The session sees ONLY core tools (internal/coretools) and the tools it
+  // registered itself — initial_tools, which is where an agent profile's
+  // enabled mappings land, plus any later RegisterSessionTool. A tool
+  // reachable only because it is registered server-wide is NOT in the set,
+  // whether it was registered before or after this session existed.
+  TOOL_POLICY_PROFILE_ONLY = 2;
+}
+
+message EnsureSessionRequest {
+  string session_id = 1;
+  optional string display_name = 2;
+  repeated ToolDefinition initial_tools = 3;
+  optional string llm_provider_id = 4;
+  optional string default_model = 5;
+  // Session-level default system prompt sections (client-authored), set once here
+  // instead of on every ChatStreamRequest. Persisted on the session (llmd_sessions);
+  // when non-empty, EnsureSession REPLACES the persisted default wholesale (not a
+  // merge) so a caller can deliberately clear it back to empty by omitting it — but
+  // note that an idempotent EnsureSession call made without repeating this field
+  // (e.g. a reconnect that only wants to touch llm_provider_id) also leaves the
+  // existing persisted default untouched; only an EXPLICIT non-empty list overwrites.
+  // ChatStreamRequest.system_prompt_sections, when set, still overrides this default
+  // for that turn only — the persisted default is unaffected either way.
+  repeated SystemPromptSection system_prompt_sections = 6;
+  // Session surface / agent type (build, ask, debug, doc, pair).
+  //
+  // Previously a surface could only be set through SetSessionMeta, which meant
+  // there was no way to establish it when the session was created. Omitting it
+  // on a later idempotent ensure leaves the stored surface untouched rather than
+  // clearing it, so it is safe to send only on the first call.
+  optional string chat_surface = 7;
+  // Server-wide tool names this session may neither see NOR call.
+  //
+  // DENY WINS: the exclusion is applied last and is not undone by the session
+  // registering the same tool name itself (initial_tools or
+  // RegisterSessionTool). It used to be, which made the exclusion cosmetic —
+  // registering a session tool is reachable by any client, so anything blocked
+  // could be unblocked by naming it. Core session tools (see
+  // internal/coretools) are never hidden regardless of this list.
+  //
+  // This is enforced, not merely advertised: a disabled tool is absent from the
+  // model-facing tool list and from ListSessionTools, AND calling it anyway —
+  // via the ChatStream tool loop or the unary InvokeTool RPC — is refused with
+  // PermissionDenied.
+  //
+  // Same overwrite rule as system_prompt_sections: only an EXPLICIT non-empty
+  // list replaces the persisted set on a later EnsureSession; omitting it
+  // leaves the stored set untouched.
+  repeated string disabled_tools = 8;
+  // Fate of server-wide tools this session neither registered nor disabled.
+  // Unset = TOOL_POLICY_INHERIT_SERVER_WIDE (today's behaviour). Persisted on
+  // the session; like disabled_tools, an EnsureSession that omits it leaves
+  // the stored policy untouched, so a reconnect cannot silently widen a
+  // PROFILE_ONLY session.
+  ToolPolicy tool_policy = 9;
+  // On an EXISTING session, make initial_tools the session's tool set: tools
+  // it has that are not listed are removed, listed ones are added or
+  // replaced. Without it initial_tools is honoured only when the session is
+  // created, and a server-installed tool can never be removed afterwards
+  // (UnregisterSessionTool refuses them) - so a session would keep, forever,
+  // a tool its agent no longer has.
+  //
+  // Client-delegated tools (delegate_to_client) are left alone: clients own
+  // those and reconcile them before every turn. Core tools are not session
+  // registrations and are unaffected. Ignored when the session is new
+  // (initial_tools is the whole set then anyway).
+  bool replace_tools = 10;
+  // Client-supplied key/value context that llmd stores on the session and
+  // passes unchanged to every tool call in the turn (ExecutorToolCall.tool_context).
+  // llmd never interprets it. ChatStreamRequest.tool_context overrides it per
+  // turn; when that is unset or empty, this session map is used.
+  map<string, string> tool_context = 11;
+}
+
+message EnsureSessionResponse {}
+
+// --- Agent profiles ---
+//
+// An agent profile is a reusable configuration bundle (system prompt sections,
+// provider/model defaults, memory flag, tool mapping) that is RESOLVED at
+// session-creation time by CreateSessionFromAgentProfile. Sessions never
+// reference a profile afterwards; editing a profile does not affect sessions
+// already created from it.
+
+// One entry of an AgentProfile's tool mapping.
+//
+// enabled = true  → the named server-wide tool is cloned into the session's
+//                   initial_tools when a session is created from the profile.
+// enabled = false → the tool name is listed in the session's disabled_tools
+//                   (EnsureSessionRequest.disabled_tools), which both hides it
+//                   and refuses it at dispatch. Deny wins: a per-session
+//                   registration of the same name does NOT bring it back.
+// Core session tools (see internal/coretools) can never be disabled; a profile
+// carrying an enabled = false mapping that names one is REJECTED by Validate
+// rather than silently ignored.
+//
+// Under TOOL_POLICY_PROFILE_ONLY a profile needs no negative mappings at all:
+// silence already means no, so listing only the enabled tools is the allowlist.
+message ToolMapping {
+  string tool_name = 1;
+  bool enabled = 2;
+}
+
+message AgentProfile {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  // Materialized into EnsureSessionRequest.system_prompt_sections.
+  repeated SystemPromptSection system_prompt_sections = 4;
+  optional string llm_provider_id = 5;
+  optional string default_model = 6;
+  bool memory_enabled = 7;
+  repeated ToolMapping tool_mapping = 8;
+  // RFC3339 timestamps. Empty for static (code-defined) profiles.
+  string created_at = 9;
+  string updated_at = 10;
+  // Static profiles are defined in code and are read-only: Create/Update/Delete
+  // refuse them.
+  bool is_static = 11;
+  // Materialized into EnsureSessionRequest.tool_policy. PROFILE_ONLY makes
+  // tool_mapping an allowlist: only the enabled entries (plus core tools) reach
+  // the session, so a tool registered server-wide later cannot leak in.
+  ToolPolicy tool_policy = 12;
+}
+
+message CreateAgentProfileRequest {
+  string name = 1;
+  string description = 2;
+  repeated SystemPromptSection system_prompt_sections = 3;
+  optional string llm_provider_id = 4;
+  optional string default_model = 5;
+  bool memory_enabled = 6;
+  repeated ToolMapping tool_mapping = 7;
+  // Caller-supplied id (e.g. Owlbert's pluginId / agent-id). When absent the
+  // server generates a uuid. Fails AlreadyExists if the id is taken (including
+  // by a static profile).
+  optional string id = 8;
+  // See AgentProfile.tool_policy. Unset = INHERIT_SERVER_WIDE.
+  ToolPolicy tool_policy = 9;
+}
+
+message CreateAgentProfileResponse {
+  AgentProfile profile = 1;
+}
+
+// Wholesale replace of the stored profile identified by id (same rule as
+// UpdateLlmProviderConfigRequest): every field is overwritten with the value
+// given here, omitted optionals clear the stored value. Fails NotFound if the
+// id does not exist and FailedPrecondition if it names a static profile.
+message UpdateAgentProfileRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated SystemPromptSection system_prompt_sections = 4;
+  optional string llm_provider_id = 5;
+  optional string default_model = 6;
+  bool memory_enabled = 7;
+  repeated ToolMapping tool_mapping = 8;
+  // See AgentProfile.tool_policy. Wholesale replace like every other field:
+  // omitting it resets the profile to INHERIT_SERVER_WIDE.
+  ToolPolicy tool_policy = 9;
+}
+
+message UpdateAgentProfileResponse {
+  AgentProfile profile = 1;
+}
+
+message DeleteAgentProfileRequest {
+  string id = 1;
+}
+
+message DeleteAgentProfileResponse {}
+
+message GetAgentProfileRequest {
+  string id = 1;
+}
+
+message GetAgentProfileResponse {
+  AgentProfile profile = 1;
+}
+
+message ListAgentProfilesRequest {}
+
+message ListAgentProfilesResponse {
+  repeated AgentProfile profiles = 1;
+}
+
+// Creates (or idempotently ensures) a session whose configuration is derived
+// from an agent profile, then forgets the profile: the result is an ordinary
+// session, equivalent to an EnsureSession call built from the profile's
+// fields plus the overrides below.
+message CreateSessionFromAgentProfileRequest {
+  string agent_profile_id = 1;
+  string session_id = 2;
+  optional string display_name = 3;
+  // Per-session overrides of the profile's provider/model defaults.
+  optional string llm_provider_id_override = 4;
+  optional string default_model_override = 5;
+  // Extra session-scoped tools registered on top of the profile's enabled
+  // tool mapping. A tool named here that the profile disables is visible
+  // (explicit session registration wins).
+  repeated ToolDefinition additional_tools = 6;
+  optional string chat_surface = 7;
+}
+
+message CreateSessionFromAgentProfileResponse {
+  string session_id = 1;
+  string agent_profile_id = 2;
+}
+
+message UpdateSessionLlmRequest {
+  string session_id = 1;
+  optional string llm_provider_id = 2;
+  optional string default_model = 3;
+}
+
+message UpdateSessionLlmResponse {}
+
+message DestroySessionRequest {
+  string session_id = 1;
+}
+
+message DestroySessionResponse {}
+
+message RegisterSessionToolRequest {
+  string session_id = 1;
+  ToolDefinition tool = 2;
+}
+
+message RegisterSessionToolResponse {}
+
+message UnregisterSessionToolRequest {
+  string session_id = 1;
+  string name = 2;
+}
+
+message UnregisterSessionToolResponse {}
+
+message ListSessionToolsRequest {
+  string session_id = 1;
+}
+
+message ListSessionToolsResponse {
+  repeated ToolDefinition tools = 1;
+}
+
+// Lists every tool that exists for the caller's tenant (llmd-tenant-id
+// metadata), independent of any session: the host's registered tools plus the
+// executor tools registered for this tenant over ToolProviderService
+// (including ones whose executor is currently disconnected). No session-level
+// filtering is applied. Secrets in tool definitions are redacted.
+message ListToolsRequest {}
+
+message ListToolsResponse {
+  repeated ToolDefinition tools = 1;
+}
+
+// Returns persisted chat messages for a session (same store ChatStream writes to when session_id is set).
+message GetSessionHistoryRequest {
+  string session_id = 2;
+  // If > 0, return only the last N messages; 0 means full history.
+  int32 max_messages = 3;
+  // When true, return ONLY the turn/event-log status fields (turn_in_progress,
+  // events_seq, turn_start_seq) and skip loading the transcript, attachments,
+  // tracked documents and seed. Cheap enough to poll. The response echoes
+  // status_only = true so an empty `messages` is never mistaken for an empty
+  // session.
+  bool status_only = 4;
+}
+
+// One raw persisted attachment row (mirrors llmd_chat_messages kind="attachment").
+// content is the serialized attachment payload (includes the stored anchor message id);
+// the client parses it the same way regardless of transport.
+message SessionAttachmentRow {
+  string content = 1;
+  string tool_call_id = 2;
+}
+
+// One tracked-document version as attached to a session at a message, for UI display
+// (badges + a content viewer). Mirrors a row of llmd_tracked_document_versions.
+message TrackedDocumentRef {
+  string document_id = 1;
+  string name = 2;
+  // 0-based version index for this document within the session.
+  int32 version = 3;
+  // The user message this version was attached to (badge anchor).
+  string anchor_message_id = 4;
+  // "initial" for version 0, "updated" for later versions.
+  string change = 5;
+  // Full snapshot content (front matter included) for the viewer.
+  string content = 6;
+}
+
+message GetSessionHistoryResponse {
+  repeated Message messages = 1;
+  // Raw attachment rows for this session (ask cards + embedded build runs); client re-hydrates.
+  repeated SessionAttachmentRow attachment_rows = 2;
+  // Tracked-document versions attached across the session (for badges + viewer), oldest first.
+  repeated TrackedDocumentRef tracked_documents = 3;
+  // The session's first-turn context seed (graph status, etc.), or empty when none.
+  string initial_seed = 4;
+  // True while an assistant turn for this session is still running server-side
+  // (e.g. the client navigated away mid-reply). The client should rejoin it via
+  // SubscribeSessionEvents and refetch history once the turn finishes; the
+  // messages above do not yet include that turn's reply.
+  bool turn_in_progress = 5;
+  // Session event-log head when this response was built. Subscribe with
+  // after_seq = events_seq to receive only events that come after this history.
+  int64 events_seq = 6;
+  // When turn_in_progress: the event-log seq the running turn started after.
+  // Subscribe with after_seq = turn_start_seq to rebuild that turn's reply live.
+  int64 turn_start_seq = 7;
+  // True when the request set status_only: messages, attachment_rows,
+  // tracked_documents and initial_seed were NOT loaded and are empty regardless
+  // of what the session contains. Only the status fields above are meaningful.
+  bool status_only = 8;
+  // When turn_in_progress: server wall-clock ms the running turn started (the
+  // same instant as its UserTurnCommitted.committed_at_ms). 0 when unknown.
+  int64 turn_started_at_ms = 9;
+  // The session's most recently FINISHED turn, server wall-clock ms, so a
+  // client opening the session can show how long it took. 0 when no turn has
+  // finished since llmd started (kept in memory only).
+  int64 last_turn_started_at_ms = 10;
+  int64 last_turn_ended_at_ms = 11;
+}
+
+// Subscribe to session events for replay and subscription.
+// When afterSeq=0, returns a snapshot followed by live deltas.
+// When afterSeq>0, returns only events since that seq.
+message SubscribeSessionEventsRequest {
+  string session_id = 1;
+  // When 0, return a snapshot of all events; when > 0, return only events since this seq.
+  int64 after_seq = 2;
+}
+
+// Explicitly stop the session's in-flight assistant turn.
+//
+// A ChatStream turn runs on a server-owned context: the client going away
+// (navigation, reload, network blip) does NOT cancel it — the turn finishes and
+// is persisted, and a returning client rejoins via SubscribeSessionEvents.
+// This RPC is the only way to cut a turn short. The streamed-so-far partial is
+// salvaged and committed with finish_reason="cancelled" (or `reason` if set).
+message CancelTurnRequest {
+  string session_id = 1;
+  // Optional finish_reason override for the salvaged partial; default "cancelled".
+  string reason = 2;
+}
+
+message CancelTurnResponse {
+  // True when a running turn was found and signalled; false when the session was idle.
+  bool cancelled = 1;
+}
+
+// Replace all persisted chat messages for a session (e.g. after the client deletes/truncates transcript).
+message ReplaceSessionHistoryRequest {
+  string session_id = 2;
+  repeated Message messages = 3;
+}
+
+message ReplaceSessionHistoryResponse {}
+
+// Persist or replace one UI attachment row anchored to a message's turn.
+message UpsertSessionAttachmentRequest {
+  string session_id = 1;
+  // Message whose turn this attachment anchors to. If that assistant row isn't flushed yet,
+  // llmd falls back to the latest assistant turn so the attachment still persists.
+  string anchor_message_id = 2;
+  MessageAttachment attachment = 3;
+}
+
+message UpsertSessionAttachmentResponse {}
+
+message DeleteSessionAttachmentRequest {
+  string session_id = 1;
+  string attachment_id = 2;
+}
+
+message DeleteSessionAttachmentResponse {}
+
+// Splice updated content into a persisted assistant message (e.g. inline attachment tags after flush).
+message PatchAssistantMessageContentRequest {
+  string session_id = 1;
+  string message_id = 2;
+  string content = 3;
+  // When set, only the assistant row for this turn is updated; otherwise the latest assistant row for the message.
+  optional string turn_id = 4;
+}
+
+message PatchAssistantMessageContentResponse {}
+
+// --- Registered LLM providers (YAML-backed registry in llmd) ---
+
+enum LlmProviderType {
+  LLM_PROVIDER_TYPE_UNSPECIFIED = 0;
+  LLM_PROVIDER_TYPE_OPENAI = 1;
+  LLM_PROVIDER_TYPE_OLLAMA = 2;
+  LLM_PROVIDER_TYPE_ANTHROPIC = 3;
+  LLM_PROVIDER_TYPE_CURSOR_CLI = 4;
+  // Local Claude Code CLI (`claude` with --print); see go-agents/claude-cli-agent.ts.
+  LLM_PROVIDER_TYPE_CLAUDE_CODE = 5;
+  // Amazon Bedrock Converse / ConverseStream (AWS credentials; model IDs per region).
+  LLM_PROVIDER_TYPE_BEDROCK = 6;
+  // Claude Code CLI with headless --resume (stateful; incremental tail via ProviderSessionSync).
+  LLM_PROVIDER_TYPE_CLAUDE_CODE_V2 = 7;
+  // Google Gemini Developer API (go-genai).
+  LLM_PROVIDER_TYPE_GEMINI = 8;
+  // OpenRouter (OpenAI-compatible gateway to many upstream providers).
+  LLM_PROVIDER_TYPE_OPENROUTER = 9;
+}
+
+// Cursor CLI --mode for cursor_cli providers (configured on the provider, not on agents).
+enum CursorCliMode {
+  CURSOR_CLI_MODE_UNSPECIFIED = 0;
+  // Omit --mode (Cursor CLI default / full agent behavior).
+  CURSOR_CLI_MODE_DEFAULT = 1;
+  CURSOR_CLI_MODE_ASK = 2;
+  CURSOR_CLI_MODE_PLAN = 3;
+}
+
+message LlmProviderInfo {
+  string id = 1;
+  LlmProviderType type = 2;
+  string default_model = 3;
+  int32 catalog_model_count = 4;
+  int64 models_refreshed_unix_ms = 5;
+  // True when this id is registered via the database (RegisterLlmProvider), not only a compile-time default.
+  bool user_registered = 6;
+  // When true (Cursor CLI), llmd can send only unsynced message tails with a provider session id (--resume) when
+  // ProviderSessionSync is configured; otherwise it sends the full transcript like other providers.
+  bool stateful = 7;
+}
+
+message CatalogLlmModel {
+  string provider_id = 1;
+  string model_id = 2;
+  optional string display_name = 3;
+}
+
+message ListLlmProvidersRequest {}
+
+message ListLlmProvidersResponse {
+  repeated LlmProviderInfo providers = 1;
+}
+
+// One provider kind llmd knows how to register, for populating an "add provider" flow
+// before any instance of it exists.
+message SupportedLlmProviderType {
+  LlmProviderType type = 1;
+  // Stable lowercase identifier matching the RegisterLlmProvider config kind (e.g. "openai",
+  // "claude_code_v2"). Same string as internal Kind.String() on llmd's side.
+  string short_code = 2;
+  string display_name = 3;
+  // True when registering this provider requires an API key field in the request config.
+  bool requires_api_key = 4;
+  // True when this provider shells out to a local CLI (cursor_cli, claude_code_v2) rather than
+  // calling an HTTP API directly.
+  bool is_cli_backed = 5;
+}
+
+message ListSupportedLlmProviderTypesRequest {}
+
+message ListSupportedLlmProviderTypesResponse {
+  repeated SupportedLlmProviderType types = 1;
+}
+
+message RefreshLlmProviderModelsRequest {
+  string provider_id = 1;
+}
+
+message RefreshLlmProviderModelsResponse {
+  int32 models_discovered = 1;
+}
+
+message ListLlmCatalogModelsRequest {
+  optional string provider_id = 1;
+}
+
+message ListLlmCatalogModelsResponse {
+  repeated CatalogLlmModel models = 1;
+}
+
+// --- LLM providers (persisted globally; not scoped per tenant or scope) ---
+
+message AnthropicLlmConfig {
+  string api_key = 1;
+  optional string base_url = 2;
+  optional string default_model = 3;
+  optional int64 max_output_tokens = 4;
+}
+
+message OpenAiLlmConfig {
+  string api_key = 1;
+  optional string base_url = 2;
+  optional string default_model = 3;
+  optional int32 max_tokens = 4;
+}
+
+message OllamaLlmConfig {
+  optional string base_url = 1;
+  optional string default_model = 2;
+  optional int32 max_tokens = 3;
+}
+
+message CursorCliLlmConfig {
+  optional string binary = 1;
+  optional string cwd = 2;
+  optional string workspace = 3;
+  optional string api_key = 4;
+  optional string default_model = 5;
+  // When DEFAULT or UNSPECIFIED, llmd omits --mode for the CLI.
+  CursorCliMode cli_mode = 6;
+  optional bool trust = 7;
+  optional bool approve_mcps = 8;
+  optional bool force = 9;
+  optional string session_id = 10;
+  optional int32 max_output_tokens = 11;
+}
+
+// Claude Code CLI options (aligned with go-agents/claude-cli-agent.ts).
+message ClaudeCodeLlmConfig {
+  optional string binary = 1;
+  optional string cwd = 2;
+  optional string agent = 3;
+  optional string default_model = 4;
+  optional string system_prompt = 5;
+  optional string append_system_prompt = 6;
+  // "low" | "medium" | "high" | "xhigh" | "max"
+  optional string effort = 7;
+  // e.g. default, acceptEdits, bypassPermissions, dontAsk, plan
+  optional string permission_mode = 8;
+  optional double max_budget_usd = 9;
+  repeated string add_dir = 10;
+  repeated string allowed_tools = 11;
+  repeated string disallowed_tools = 12;
+  optional string mcp_config_path = 13;
+  optional int32 timeout_ms = 14;
+  optional int32 max_turns = 15;
+  // CLI --setting-sources values: user, project, local
+  repeated string setting_sources = 16;
+  // Thinking config merged into --settings (enabled, disabled, adaptive).
+  optional string thinking_type = 17;
+  optional int32 thinking_budget_tokens = 18;
+  // JSON object merged into --settings hooks key.
+  optional string hooks_json = 19;
+  optional bool strict_mcp_config = 20;
+  optional bool include_hook_events = 21;
+  // Directory for Claude Code settings (sets CLAUDE_CONFIG_DIR on the CLI process).
+  optional string config_dir = 22;
+  // When true, load the user's own Claude config (~/.claude). By default --bare is passed
+  // to avoid conflicts (e.g. plan mode being stuck on from personal settings).
+  optional bool use_my_claude_config = 23;
+  // When true, enable Claude Code's ToolSearch so MCP tool schemas are deferred
+  // (loaded on demand) — client token-saver opt-in. Default false: all tool
+  // schemas are sent eagerly and ToolSearch is not exposed.
+  optional bool defer_tool_schemas = 24;
+  // When true, use Claude Code's own built-in preset system prompt (its assistant
+  // identity/persona plus an automatic <env> block disclosing cwd, platform, OS
+  // version, and today's date). Default false: the client sends only explicitly
+  // configured system content (system_prompt / append_system_prompt / the chat's
+  // system message) and nothing else — no Claude Code persona, no automatic
+  // environment disclosure, and no system prompt at all when none of those are set.
+  optional bool use_claude_code_preset = 25;
+  // Long-lived OAuth token from `claude setup-token`. When set, it is passed to the
+  // CLI as CLAUDE_CODE_OAUTH_TOKEN; any ambient value in llmd's own environment is
+  // always stripped so each provider authenticates only with its own credentials.
+  optional string oauth_token = 26;
+}
+
+// Google Gemini Developer API (API key; optional base URL override for proxies).
+message GeminiLlmConfig {
+  string api_key = 1;
+  optional string base_url = 2;
+  optional string default_model = 3;
+  optional int64 max_output_tokens = 4;
+}
+
+// OpenRouter API (API key; optional base URL override).
+message OpenRouterLlmConfig {
+  string api_key = 1;
+  optional string base_url = 2;
+  optional string default_model = 3;
+  optional OpenRouterCallOptions default_call_options = 4;
+  // Avoid upstream endpoints currently reported unhealthy. Unset means enabled.
+  optional bool avoid_unhealthy_endpoints = 5;
+  // How long an endpoint-health result is cached, in seconds. Unset or <= 0 means 60.
+  optional int32 endpoint_health_ttl_seconds = 6;
+}
+
+// AWS region + optional profile; auth via default credential chain (env, profile, IAM role, etc.).
+message BedrockLlmConfig {
+  string region = 1;
+  optional string profile = 2;
+  optional string default_model = 3;
+  optional int64 max_output_tokens = 4;
+  // Optional custom endpoint for VPC/private Bedrock (runtime + control plane listing).
+  optional string endpoint_url = 5;
+  // Optional STS AssumeRole: role to assume on top of the default credential chain.
+  optional string assume_role_arn = 6;
+  // Session name used for AssumeRole.
+  optional string role_session_name = 7;
+  // External ID passed to AssumeRole. Secret: never log or return it in clear text.
+  optional string external_id = 8;
+}
+
+message RegisterLlmProviderRequest {
+  string provider_id = 1;
+  LlmProviderType type = 2;
+  oneof config {
+    AnthropicLlmConfig anthropic = 3;
+    OpenAiLlmConfig openai = 4;
+    OllamaLlmConfig ollama = 5;
+    CursorCliLlmConfig cursor_cli = 6;
+    ClaudeCodeLlmConfig claude_code = 7;
+    BedrockLlmConfig bedrock = 8;
+    GeminiLlmConfig gemini = 9;
+    OpenRouterLlmConfig openrouter = 10;
+  }
+}
+
+message RegisterLlmProviderResponse {}
+
+message UnregisterLlmProviderRequest {
+  string provider_id = 1;
+}
+
+message UnregisterLlmProviderResponse {}
+
+message GetLlmProviderConfigRequest {
+  string provider_id = 1;
+}
+
+// Full stored config for one registered provider (same shape as
+// RegisterLlmProviderRequest), for a "view/edit provider" UI. Note this
+// echoes secret fields (e.g. api_key) verbatim from storage — callers
+// exposing this to a UI should treat the response as sensitive and avoid
+// logging it.
+message GetLlmProviderConfigResponse {
+  string provider_id = 1;
+  LlmProviderType type = 2;
+  oneof config {
+    AnthropicLlmConfig anthropic = 3;
+    OpenAiLlmConfig openai = 4;
+    OllamaLlmConfig ollama = 5;
+    CursorCliLlmConfig cursor_cli = 6;
+    ClaudeCodeLlmConfig claude_code = 7;
+    BedrockLlmConfig bedrock = 8;
+    GeminiLlmConfig gemini = 9;
+    OpenRouterLlmConfig openrouter = 10;
+  }
+}
+
+// Replaces the full stored config for an already-registered provider_id (same
+// field-for-field semantics as RegisterLlmProviderRequest's oneof). Unlike
+// RegisterLlmProvider, this fails NotFound if provider_id does not already
+// exist — use RegisterLlmProvider to create a new provider.
+message UpdateLlmProviderConfigRequest {
+  string provider_id = 1;
+  LlmProviderType type = 2;
+  oneof config {
+    AnthropicLlmConfig anthropic = 3;
+    OpenAiLlmConfig openai = 4;
+    OllamaLlmConfig ollama = 5;
+    CursorCliLlmConfig cursor_cli = 6;
+    ClaudeCodeLlmConfig claude_code = 7;
+    BedrockLlmConfig bedrock = 8;
+    GeminiLlmConfig gemini = 9;
+    OpenRouterLlmConfig openrouter = 10;
+  }
+}
+
+message UpdateLlmProviderConfigResponse {}
+
+// Scan the machine llmd is running on for installations of a CLI-backed
+// provider's binary (Claude Code, Cursor Agent).
+//
+// This exists because llmd is often not running where the user is looking: the
+// provider UI is in a browser, while llmd may be in a container, on a remote
+// host, or under a launcher whose PATH bears no resemblance to the user's login
+// shell. "Type the path to your claude binary" is unanswerable from there.
+//
+// Registration performs this scan implicitly when a CLI provider is created
+// with no binary set; this RPC is the same scan made explicit, so a client can
+// show what is available (and at which versions) before committing.
+message DiscoverProviderBinariesRequest {
+  LlmProviderType provider_type = 1;
+  // Optional path to check instead of scanning. When set, the response
+  // describes just this path -- discovery never second-guesses an explicit
+  // choice, it only reports whether that choice works.
+  optional string binary = 2;
+}
+
+// One binary installation the scan found. Installations that are present but
+// unusable (won't execute, below the supported version floor) are reported with
+// usable=false rather than omitted: "found it, but it's too old" is far more
+// actionable than "found nothing".
+message DiscoveredProviderBinary {
+  // Absolute, symlink-resolved path to the binary.
+  string path = 1;
+  // The CLI's self-reported version; empty if it could not be read.
+  string version = 2;
+  // Why this path was considered: "override", "env", "path", "well_known".
+  string source = 3;
+  // The environment variable name or directory this came from, for display.
+  string origin = 4;
+  // Whether this binary ran and met any applicable version floor.
+  bool usable = 5;
+  // When usable is false, a user-facing sentence explaining why.
+  string error = 6;
+}
+
+message DiscoverProviderBinariesResponse {
+  // Best candidate first; usable entries sort ahead of unusable ones. Empty
+  // when nothing was found at all.
+  repeated DiscoveredProviderBinary binaries = 1;
+  // The directories and environment variables that were searched, so a client
+  // can tell the user where llmd actually looked when the list comes back empty.
+  repeated string searched = 2;
+}
+
+// Why a connection check failed, as something a client can branch on.
+//
+// The human-readable message is not enough: "not signed in" and "binary is
+// missing" need completely different UI (a sign-in button vs install
+// instructions), and substring-matching a sentence written for humans is not a
+// contract. Clients should switch on this and use `message` only for display.
+enum ProviderConnectionStatus {
+  PROVIDER_CONNECTION_STATUS_UNSPECIFIED = 0;
+  // The CLI is present, new enough, authenticated, and can resume sessions.
+  PROVIDER_CONNECTION_STATUS_OK = 1;
+  // No CLI at the configured path, or none found on this machine.
+  PROVIDER_CONNECTION_STATUS_BINARY_NOT_FOUND = 2;
+  // Found and runs, but older than llmd's supported minimum.
+  PROVIDER_CONNECTION_STATUS_VERSION_TOO_OLD = 3;
+  // Works, but has no valid credentials. THIS is the one the user can fix:
+  // drive an interactive login (RunProviderAuthCommand) and check again.
+  PROVIDER_CONNECTION_STATUS_NOT_AUTHENTICATED = 4;
+  // The CLI cannot do headless session resume, which llmd requires.
+  PROVIDER_CONNECTION_STATUS_RESUME_UNSUPPORTED = 5;
+  // The CLI never exited within the timeout.
+  PROVIDER_CONNECTION_STATUS_TIMED_OUT = 6;
+  // Ran, failed, cause not classifiable -- see `details`.
+  PROVIDER_CONNECTION_STATUS_FAILED = 7;
+}
+
+// Check whether a CLI-backed provider config can actually be used, WITHOUT
+// registering it: does the binary exist, is it new enough, is it signed in, can
+// it resume sessions.
+//
+// This is the "Connect"/"Test" button behind a provider form. Registration runs
+// the same checks, but only tells you pass/fail by succeeding or returning one
+// opaque error, and it persists on success -- so it cannot answer "is this
+// config any good?" before the user commits to it, and it cannot say "you just
+// need to sign in" in a way a UI can act on.
+//
+// COST: for Claude Code this makes two real (cheap, haiku) model calls, because
+// headless resume cannot be verified any other way. Treat it as an explicit
+// user action, not something to run on every keystroke or form render.
+message CheckProviderConnectionRequest {
+  LlmProviderType provider_type = 1;
+  // Optional binary path. Empty means "scan this machine for it", matching what
+  // registration does with an unset binary.
+  optional string binary = 2;
+  // Optional working directory for the CLI subprocess.
+  optional string cwd = 3;
+  // Optional CLAUDE_CONFIG_DIR-style config directory. Pass the SAME value the
+  // provider uses (and that RunProviderAuthCommand was given): credentials are
+  // stored per config directory, so omitting it checks a different account than
+  // the one the user signed into.
+  optional string config_dir = 4;
+  // Optional overall timeout. Defaults to llmd's probe default (120s).
+  optional uint32 timeout_ms = 5;
+  // Optional CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`). Pass the SAME
+  // value the provider will be registered with, so the check authenticates as
+  // the provider will. Ambient values in llmd's environment are never used.
+  optional string oauth_token = 6;
+  // Optional provider config to check, mirroring RegisterLlmProviderRequest.config.
+  // When set, the check uses these settings (region, credentials, base URL, ...)
+  // instead of defaults. Existing clients that leave it unset are unaffected.
+  oneof config {
+    AnthropicLlmConfig anthropic = 7;
+    OpenAiLlmConfig openai = 8;
+    OllamaLlmConfig ollama = 9;
+    CursorCliLlmConfig cursor_cli = 10;
+    ClaudeCodeLlmConfig claude_code = 11;
+    BedrockLlmConfig bedrock = 12;
+    GeminiLlmConfig gemini = 13;
+    OpenRouterLlmConfig openrouter = 14;
+  }
+}
+
+// Where the credentials used by a connection check came from.
+enum CredentialSource {
+  CREDENTIAL_SOURCE_UNSPECIFIED = 0;
+  // The provider's default credential chain (environment, shared files, metadata service).
+  CREDENTIAL_SOURCE_DEFAULT_CHAIN = 1;
+  // Credentials from an assumed role (STS AssumeRole).
+  CREDENTIAL_SOURCE_ASSUMED_ROLE = 2;
+  // Credentials from a web identity token (e.g. OIDC / IRSA).
+  CREDENTIAL_SOURCE_WEB_IDENTITY = 3;
+  // An API key supplied in the config.
+  CREDENTIAL_SOURCE_API_KEY = 4;
+  // A named profile or shared credentials file.
+  CREDENTIAL_SOURCE_PROFILE = 5;
+  // A bearer token supplied in the config.
+  CREDENTIAL_SOURCE_BEARER_TOKEN = 6;
+  // No credentials were used or found.
+  CREDENTIAL_SOURCE_NONE = 7;
+}
+
+// Identity of the caller as reported by the provider (e.g. AWS STS GetCallerIdentity).
+message CallerIdentity {
+  // Account identifier (e.g. AWS account ID).
+  string account = 1;
+  // ARN of the calling principal.
+  string arn = 2;
+  // Unique ID of the calling principal.
+  string user_id = 3;
+}
+
+message CheckProviderConnectionResponse {
+  ProviderConnectionStatus status = 1;
+  // Absolute path of the binary actually probed, when one was resolved. Worth
+  // showing: "which claude is it even running" is a common source of confusion
+  // when several installs exist.
+  string binary = 2;
+  // The CLI's self-reported version, when it could be read.
+  string version = 3;
+  // User-facing explanation. Display this; do not parse it.
+  string message = 4;
+  // Diagnostic detail (CLI stderr, parse errors). For logs and "show details".
+  string details = 5;
+  // Convenience mirror of status == NOT_AUTHENTICATED, so a client can gate a
+  // sign-in affordance without enumerating the status enum.
+  bool needs_auth = 6;
+  // Structured error when the check failed at the provider; unset on success.
+  LlmError error = 7;
+  // Where the credentials used for the check came from.
+  CredentialSource credential_source = 8;
+  // Non-fatal warnings (e.g. default model not found); display, do not parse.
+  repeated string warnings = 9;
+  // ARN of the role that was assumed, when credentials came from an assumed role.
+  string assumed_role_arn = 10;
+  // Identity the credentials resolved to, when the provider can report it.
+  CallerIdentity caller_identity = 11;
+}
+
+// Scope: intentionally generic (provider_type, not "claude-specific" wire
+// shapes) so other CLI providers needing interactive auth (Cursor CLI, etc.)
+// can reuse it; today only LLM_PROVIDER_TYPE_CLAUDE_CODE /
+// LLM_PROVIDER_TYPE_CLAUDE_CODE_V2 are implemented server-side.
+message ProviderAuthCommandStart {
+  LlmProviderType provider_type = 1;
+  // Optional CLI binary override (falls back to the provider's configured/default binary).
+  optional string binary = 2;
+  // Optional CLAUDE_CONFIG_DIR-style config directory override.
+  optional string config_dir = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message ProviderAuthCommandResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Session-based provider auth: RunProviderAuthCommand decomposed into
+// unary + server-streaming calls.
+//
+// WHY THIS EXISTS ALONGSIDE RunProviderAuthCommand: interactive CLI login has
+// no headless equivalent (`claude setup-token` is interactive too), so it needs
+// a PTY, which is naturally bidirectional. But gRPC-Web has no wire encoding
+// for client-streaming or bidi calls at all -- it can only do unary and
+// server-streaming. A browser therefore cannot call RunProviderAuthCommand,
+// ever. That is a protocol limit, not an implementation gap.
+//
+// So the same PTY is exposed as three calls a browser CAN make: start it (unary,
+// returns an id), read from it (server-streaming), write to it (unary). llmd
+// holds the PTY between calls, keyed by session id.
+//
+// Prefer RunProviderAuthCommand when the caller has a real bidi transport
+// (Node/Electron main process): it is one call with no server-side session to
+// leak. Use these when the caller is a browser.
+// ---------------------------------------------------------------------------
+
+message StartProviderAuthSessionRequest {
+  LlmProviderType provider_type = 1;
+  // Optional CLI binary override (falls back to PATH / discovery).
+  optional string binary = 2;
+  // Optional CLAUDE_CONFIG_DIR-style config directory. Pass the SAME value the
+  // provider uses, and the same one given to CheckProviderConnection --
+  // credentials are written per config directory, so signing in with one and
+  // checking another silently does nothing.
+  optional string config_dir = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message StartProviderAuthSessionResponse {
+  // Opaque id for the other three calls.
+  string session_id = 1;
+}
+
+message StreamProviderAuthOutputRequest {
+  string session_id = 1;
+  // Replay output already produced before this stream attached.
+  //
+  // Default (false) loses whatever the CLI printed between StartProviderAuth-
+  // Session returning and the stream connecting -- which, for a login flow,
+  // is usually the URL the user has to visit. Set true unless you are
+  // deliberately resuming and already rendered the earlier bytes.
+  bool replay = 2;
+}
+
+message SendProviderAuthInputRequest {
+  string session_id = 1;
+  oneof frame {
+    // Raw bytes typed by the user, written to the PTY's stdin.
+    bytes stdin = 2;
+    ProviderAuthCommandResize resize = 3;
+  }
+}
+
+message SendProviderAuthInputResponse {}
+
+message EndProviderAuthSessionRequest {
+  string session_id = 1;
+}
+
+message EndProviderAuthSessionResponse {
+  // Exit code, when the process had already exited on its own.
+  int32 exit_code = 1;
+  // False when the process was still running and had to be killed.
+  bool exited = 2;
+}
+
+message ProviderAuthCommandInput {
+  oneof frame {
+    ProviderAuthCommandStart start = 1;
+    // Raw bytes typed by the user, written to the PTY's stdin.
+    bytes stdin = 2;
+    ProviderAuthCommandResize resize = 3;
+  }
+}
+
+message ProviderAuthCommandOutput {
+  oneof frame {
+    // Combined PTY output (stdout+stderr are not distinguishable once behind a PTY).
+    bytes output = 1;
+    // Sent once, after the process exits; the stream closes immediately after.
+    int32 exit_code = 2;
+    // Sent once a process has been started successfully.
+    bool started = 3;
+  }
+}
+
+// --- Embedding providers (typed, per-kind config — mirrors RegisterLlmProviderRequest) ---
+
+message UserOllamaEmbeddingConfig {
+  string base_url = 1;
+  string embed_model = 2;
+  int32 dimensions = 3;
+}
+
+message UserOpenAiCompatEmbeddingConfig {
+  string base_url = 1;
+  optional string api_key = 2;
+  string embed_model = 3;
+  int32 dimensions = 4;
+}
+
+message UserBedrockEmbeddingConfig {
+  string region = 1;
+  optional string profile = 2;
+  string embed_model = 3;
+  int32 dimensions = 4;
+  optional string endpoint_url = 5;
+}
+
+message RegisterUserEmbeddingProviderRequest {
+  string provider_id = 1;
+  oneof config {
+    UserOllamaEmbeddingConfig ollama = 2;
+    UserOpenAiCompatEmbeddingConfig openai_compat = 3;
+    UserBedrockEmbeddingConfig bedrock = 4;
+  }
+}
+
+message RegisterUserEmbeddingProviderResponse {}
+
+message UnregisterUserEmbeddingProviderRequest {
+  string provider_id = 1;
+}
+
+message UnregisterUserEmbeddingProviderResponse {}
+
+message ListEmbeddingProvidersRequest {}
+
+message ListEmbeddingProvidersResponse {
+  repeated string provider_ids = 1;
+}
+
+// Token usage on assistant_turn_finished (optional).
+message TokenUsage {
+  optional int64 input_tokens = 1;
+  optional int64 output_tokens = 2;
+  optional int64 cache_read_tokens = 3;
+  optional int64 cache_write_tokens = 4;
+  optional double total_cost_usd = 5;
+  // Tokens the model spent on reasoning / thinking (a subset of output on most providers).
+  optional int64 reasoning_tokens = 6;
+}
+
+// How QueryUsage returns results.
+enum UsageGroupBy {
+  USAGE_GROUP_BY_UNSPECIFIED = 0;
+  // Individual usage rows (one per recorded call).
+  USAGE_GROUP_BY_ROWS = 1;
+  // Totals per (tenant, scope, model).
+  USAGE_GROUP_BY_AGGREGATE = 2;
+}
+
+// Query token usage filtered by tenant, scope and model over a time range.
+message QueryUsageRequest {
+  // Empty = no filter on the field.
+  string tenant_id = 1;
+  string scope_id = 2;
+  string model = 3;
+  // Inclusive start / exclusive end, Unix epoch seconds; unset = unbounded.
+  optional int64 since_unix = 4;
+  optional int64 until_unix = 5;
+  UsageGroupBy group_by = 6;
+}
+
+// One recorded call's usage.
+message UsageRow {
+  string tenant_id = 1;
+  string scope_id = 2;
+  string model = 3;
+  int64 recorded_unix = 4;
+  int64 input_tokens = 5;
+  int64 output_tokens = 6;
+  int64 cache_read_tokens = 7;
+  int64 cache_write_tokens = 8;
+  int64 reasoning_tokens = 9;
+  double cost_usd = 10;
+}
+
+// Summed usage for one (tenant, scope, model).
+message UsageTotal {
+  string tenant_id = 1;
+  string scope_id = 2;
+  string model = 3;
+  int64 input_tokens = 4;
+  int64 output_tokens = 5;
+  int64 cache_read_tokens = 6;
+  int64 cache_write_tokens = 7;
+  int64 reasoning_tokens = 8;
+  double cost_usd = 9;
+  int64 call_count = 10;
+}
+
+message QueryUsageResponse {
+  // Populated when group_by = ROWS.
+  repeated UsageRow rows = 1;
+  // Populated when group_by = AGGREGATE.
+  repeated UsageTotal totals = 2;
+}
+
+message QueryToolUsageRequest {
+  int64 since_unix = 1;
+  int64 until_unix = 2;
+  // Optional; a scoped caller is always forced to its own scope.
+  optional string scope_id = 3;
+  // Optional; must match the caller's tenant when set.
+  string tenant_id = 4;
+}
+
+// Per-tool call, error and duration (ms) statistics over the window.
+message ToolUsageStat {
+  string tool_name = 1;
+  int64 calls = 2;
+  int64 errors = 3;
+  int64 min_ms = 4;
+  double median_ms = 5;
+  double mean_ms = 6;
+  int64 max_ms = 7;
+}
+
+message QueryToolUsageResponse {
+  repeated ToolUsageStat stats = 1;
+}
+
+// --- Conversation stream frames (wire shape mirrors TS ConversationEvent) ---
+
+message EvUserTurnCommitted {
+  string user_message_id = 1;
+  optional string text_preview = 2;
+  // Server wall-clock time (ms since epoch) the user turn started. Clients time
+  // the running turn from this rather than from when they happened to see it,
+  // so the clock survives reloads, rejoins and switching between sessions.
+  optional int64 committed_at_ms = 3;
+}
+
+message EvAssistantTurnStarted {
+  string turn_id = 1;
+  optional bool thinking_enabled = 2;
+  optional bool streaming_tool_calls = 3;
+  optional string parent_turn_group_id = 4;
+  optional int64 turn_seq = 5;
+}
+
+message EvAssistantThinkingDelta {
+  string turn_id = 1;
+  string delta = 2;
+}
+
+// User-facing activity headline (not chain-of-thought). Each frame is a full snapshot for the turn;
+// clients replace any prior headline for that turn_id (UI "current status" line).
+message EvAssistantActivitySnapshot {
+  string turn_id = 1;
+  string headline = 2;
+}
+
+message EvAssistantTextDelta {
+  string turn_id = 1;
+  string delta = 2;
+}
+
+message EvToolCallStreamStarted {
+  string turn_id = 1;
+  string id = 2;
+  optional string name = 3;
+}
+
+message EvToolCallArgsDelta {
+  string turn_id = 1;
+  string id = 2;
+  string args_delta = 3;
+}
+
+message EvToolCallStreamFinished {
+  string turn_id = 1;
+  string id = 2;
+  string name = 3;
+  string arguments_json = 4;
+}
+
+message EvToolExecutionStarted {
+  string turn_id = 1;
+  string tool_call_id = 2;
+  string name = 3;
+  // When set, execution is delegate_to_client; client must call SubmitToolResults with this nonce.
+  optional string client_wait_nonce = 4;
+  // The arguments this tool was invoked with, as a JSON object, so a UI can
+  // render what the call is actually DOING ("Reading lines 15-200 of foo.go")
+  // rather than just the tool name.
+  //
+  // Set on every transport. It matters most for MCP-dispatched tools (Claude
+  // Code / Cursor CLI): their model-side tool call happens inside the CLI, so
+  // llmd never emits EvToolCallStreamFinished for them and this is the ONLY
+  // frame carrying their arguments. Native backends also populate it so a UI
+  // has one field to read regardless of provider.
+  //
+  // May be shortened — see arguments_truncated. Never contains secrets beyond
+  // whatever the caller put in the tool arguments themselves.
+  optional string arguments_json = 5;
+  // True when llmd shortened the arguments to bound the event log. Oversized
+  // VALUES are elided (a file body becomes a short marker) while every key and
+  // small scalar is kept, so the result is still parseable JSON and still
+  // carries the identifying fields a label is built from. Treat it as display
+  // material: anything needing exact arguments reads the tool call from
+  // session history.
+  optional bool arguments_truncated = 6;
+}
+
+message EvToolExecutionFinished {
+  string turn_id = 1;
+  string tool_call_id = 2;
+  string name = 3;
+  bool success = 4;
+  optional string error_message = 5;
+}
+
+message EvAssistantTurnFinished {
+  string turn_id = 1;
+  optional string assistant_message_id = 2;
+  optional string finish_reason = 3;
+  TokenUsage usage = 4;
+  // Wall time, in ms, of the model call that produced assistant_message_id.
+  // Unset when it was not measured.
+  optional int64 model_duration_ms = 5;
+}
+
+message EvAssistantTurnFailed {
+  string turn_id = 1;
+  string error = 2;
+}
+
+message EvConversationAborted {
+  optional string reason = 1;
+}
+
+// Agent-authored status headline (set_status tool). Distinct from
+// EvAssistantActivitySnapshot: that one is provider-extracted chain-of-
+// thought summarization tied to a turn_id; this one is an explicit,
+// model-issued "here's what I'm doing" string, scoped to the session rather
+// than any single turn (it can be emitted by MCP-driven agentic CLIs that
+// have no ChatStream turn at all).
+message EvSessionStatus {
+  string session_id = 1;
+  string headline = 2;
+}
+
+// Session title set via the set_session_title tool (agent-authored, distinct
+// from the client/UI-authored SessionMeta.title write path via
+// SetSessionMeta).
+message EvSessionTitleChanged {
+  string session_id = 1;
+  string title = 2;
+}
+
+// Session todo list changed via add_todo/update_todo (agent-authored).
+// todos_json is the same encoding SessionMeta.todos_json / llmd_sessions.todos_json
+// persist (see store.TodoItem): a JSON array of {id, description, status,
+// created_turn_seq, started_turn_seq, completed_turn_seq}.
+message EvTodosUpdated {
+  string session_id = 1;
+  string todos_json = 2;
+}
+
+// One user message waiting its turn on a session.
+message QueuedMessage {
+  // Queue entry id — what remove/reorder address. NOT a message id: the message
+  // id is minted only when the entry is finally sent as a turn.
+  string id = 1;
+  string content = 2;
+  // "pending" or "running". Running means some drainer has claimed it.
+  string state = 3;
+  // Identifies the drainer running this entry; empty while pending.
+  string claim_owner = 4;
+  // Unix seconds at which the claim stops being believed, so a UI can show a
+  // stalled entry rather than one eternally in progress. Unset while pending.
+  optional int64 claim_expires_at_unix = 5;
+  int64 created_at_unix = 6;
+  // Attachments the message will carry when it is sent as a turn. Persisted
+  // anchored to the user message the entry becomes; provider-facing `content`
+  // is spliced into that message at send time.
+  repeated MessageAttachment attachments = 7;
+  // How the turn this entry becomes must run (e.g. tools disabled).
+  TurnOptions turn_options = 8;
+}
+
+// Per-turn behavior switches carried from a queued message (or a direct
+// ChatStream call) onto the turn it starts.
+message TurnOptions {
+  // No tools this turn: none are offered to the provider (API or MCP), and any
+  // tool call the model makes anyway is refused and ends the turn. For
+  // informational messages (ask-card answers, notifications) that should get a
+  // reply, not a run of further work.
+  bool disable_tools = 1;
+  // ChatStream only: let llmd decide whether this message runs now or waits.
+  // It runs now only when the session is idle (no turn running), its queue is
+  // empty and not paused; otherwise llmd appends it to the session queue and
+  // the stream carries a single EvTurnQueued frame instead of a turn. The
+  // decision is atomic with taking the session, so a message sent in the gap
+  // between one turn ending and the next queued one starting never jumps the
+  // queue. Ignored on queued entries.
+  bool queue_if_busy = 2;
+}
+
+// ChatStream with turn_options.queue_if_busy found the session busy and put
+// the message in the session queue rather than running it. The stream ends
+// after this frame.
+message EvTurnQueued {
+  string session_id = 1;
+  QueuedMessage entry = 2;
+}
+
+// A session's message queue changed: enqueued, removed, reordered, claimed,
+// retired, paused or resumed. Carries the whole queue rather than a delta — the
+// queue is short, several clients may be editing it at once, and a full snapshot
+// means a window that missed an event still converges instead of drifting.
+message EvQueueChanged {
+  string session_id = 1;
+  repeated QueuedMessage queue = 2;
+  bool paused = 3;
+}
+
+// A session attachment (e.g. an ask_card) was created or updated — by an agent
+// tool (ask_user) or by any client via UpsertSessionAttachment. Carries the full
+// attachment so a live client can render/update it without a refetch.
+message EvAttachmentUpserted {
+  string session_id = 1;
+  string attachment_id = 2;
+  string kind = 3;
+  // Message the attachment hangs off; may be empty or unresolved for
+  // tool-created cards (render those as anchorless).
+  string message_id = 4;
+  string after_tool_call_id = 5;
+  string payload_json = 6;
+}
+
+// A session attachment was removed via DeleteSessionAttachment.
+message EvAttachmentDeleted {
+  string session_id = 1;
+  string attachment_id = 2;
+}
+
+// One streamed observation for the client. schema_version matches TS CONVERSATION_EVENT_SCHEMA_VERSION.
+message ConversationStreamFrame {
+  int32 schema_version = 1;
+  oneof frame {
+    EvUserTurnCommitted user_turn_committed = 2;
+    EvAssistantTurnStarted assistant_turn_started = 3;
+    EvAssistantThinkingDelta assistant_thinking_delta = 4;
+    EvAssistantTextDelta assistant_text_delta = 5;
+    EvToolCallStreamStarted tool_call_stream_started = 6;
+    EvToolCallArgsDelta tool_call_args_delta = 7;
+    EvToolCallStreamFinished tool_call_stream_finished = 8;
+    EvToolExecutionStarted tool_execution_started = 9;
+    EvToolExecutionFinished tool_execution_finished = 10;
+    EvAssistantTurnFinished assistant_turn_finished = 11;
+    EvAssistantTurnFailed assistant_turn_failed = 12;
+    EvConversationAborted conversation_aborted = 13;
+    // Final assembled reply for this stream (sent after assistant_turn_finished).
+    AssistantReply stream_complete = 14;
+    EvAssistantActivitySnapshot assistant_activity_snapshot = 15;
+    EvSessionStatus session_status = 16;
+    EvSessionTitleChanged session_title_changed = 17;
+    EvTodosUpdated todos_updated = 18;
+    EvQueueChanged queue_changed = 19;
+    EvAttachmentUpserted attachment_upserted = 20;
+    EvAttachmentDeleted attachment_deleted = 21;
+    EvTurnQueued turn_queued = 22;
+  }
+}
+
+// --- Per-session composer draft ---------------------------------------------
+//
+// A draft is the single unsent message currently typed into a session's
+// composer. It exists so a reload, a crash or a closed laptop does not lose it.
+// One per session by definition; it is never history and the model never sees it.
+
+message UpsertSessionDraftRequest {
+  string session_id = 1;
+  // Blank content clears the draft: "the composer is empty" and "there is no
+  // draft" are the same state.
+  string content = 2;
+}
+message UpsertSessionDraftResponse {}
+
+message GetSessionDraftRequest {
+  string session_id = 1;
+}
+message GetSessionDraftResponse {
+  // Empty when the session has no draft.
+  string content = 1;
+}
+
+message ClearSessionDraftRequest {
+  string session_id = 1;
+}
+message ClearSessionDraftResponse {}
+
+// --- Per-session message queue ---------------------------------------------
+//
+// llmd owns the queue but never drains it. Drainers are ordinary clients — a
+// background daemon, or a UI while it is open — and several can be alive at
+// once, so llmd's job is the state plus the guarantees that make competing
+// drainers safe: claims are atomic and expire, pause is enforced here rather
+// than trusted to callers, and an entry that already started a turn is never
+// handed out twice.
+
+message EnqueueMessageRequest {
+  string session_id = 1;
+  // Required unless attachments is non-empty.
+  string content = 2;
+  repeated MessageAttachment attachments = 3;
+  // Applied to the turn this entry starts when it is sent.
+  TurnOptions turn_options = 4;
+}
+message EnqueueMessageResponse {
+  QueuedMessage entry = 1;
+}
+
+// Answers an agent ask card (one created by the ask_user tool).
+//
+// First answer: queued at the FRONT of the session queue as a user message
+// "Answer to: <card title>" carrying the ask_card_response attachment, so the
+// agent resumes on it (pause still applies; the entry can be reordered or
+// removed like any other). Re-answer while still queued: the queued entry's
+// attachment is replaced. Re-answer after it was sent: the persisted answer is
+// updated in place and no new turn starts.
+//
+// By default the queued answer carries turn_options.disable_tools ("answer and
+// stop": the agent replies but runs no tools). Set continue_with_tools to let
+// the answer's turn use tools ("answer and continue"). Only the first answer's
+// choice applies; a re-answer keeps the existing entry's turn options.
+message AnswerAskCardRequest {
+  string session_id = 1;
+  string card_id = 2;
+  // JSON-encoded AskCardResponse (packages/core/src/askCard.ts); its cardId
+  // must equal card_id. The provider-facing summary is built server-side.
+  string response_json = 3;
+  // When true, the answer's turn runs with tools enabled so the agent can
+  // carry on working. Default false: tools disabled on the answer's turn.
+  bool continue_with_tools = 4;
+}
+message AnswerAskCardResponse {
+  // The queued entry carrying the answer; unset when an already-sent answer
+  // was updated in place.
+  optional QueuedMessage entry = 1;
+  // True when this replaced an earlier answer (queued or sent).
+  bool updated_existing = 2;
+}
+
+// An agent ask card (ask_user) still waiting on the user: status "pending",
+// no answer recorded yet. Found across sessions, so a host can surface every
+// open question in one place without watching each session.
+message OpenAskCard {
+  string scope_id = 1;
+  string session_id = 2;
+  string card_id = 3;
+  // The card's payload as stored (packages/core/src/askCard.ts AskCard).
+  string payload_json = 4;
+  int64 created_at_ms = 5;
+}
+
+// Tenant from llmd-tenant-id; llmd-scope-id narrows to one scope, absent =
+// every scope of the tenant.
+message ListOpenAskCardsRequest {}
+message ListOpenAskCardsResponse {
+  // Oldest first.
+  repeated OpenAskCard cards = 1;
+}
+
+// Same scoping as ListOpenAskCardsRequest.
+message SubscribeAskCardsRequest {}
+
+// One ask card's state after a change. open=true carries the card as it is
+// now; open=false means it no longer waits (answered, dismissed or deleted)
+// and only the ids are set. Changes are notifications: a subscriber that
+// (re)connects lists first and then applies changes, so a missed one is
+// repaired by the next list.
+message AskCardChange {
+  OpenAskCard card = 1;
+  bool open = 2;
+}
+
+message ListQueueRequest {
+  string session_id = 1;
+}
+message ListQueueResponse {
+  repeated QueuedMessage queue = 1;
+  bool paused = 2;
+}
+
+message RemoveQueuedMessageRequest {
+  string session_id = 1;
+  string entry_id = 2;
+}
+message RemoveQueuedMessageResponse {
+  // False when the entry was already gone (ran, or removed by another window).
+  bool removed = 1;
+}
+
+message ReorderQueueRequest {
+  string session_id = 1;
+  // The full desired order. Unknown ids are ignored; entries not listed keep
+  // their relative order after the listed ones, so a stale UI can never drop
+  // queued work by omitting it.
+  repeated string entry_ids = 2;
+}
+message ReorderQueueResponse {
+  repeated QueuedMessage queue = 1;
+}
+
+message SetQueuePausedRequest {
+  string session_id = 1;
+  bool paused = 2;
+}
+message SetQueuePausedResponse {}
+
+message ClaimNextQueuedMessageRequest {
+  string session_id = 1;
+  // Identifies this drainer, so its claim can be distinguished from another's.
+  // Stable for the life of the drainer (e.g. a per-process uuid).
+  string owner = 2;
+}
+message ClaimNextQueuedMessageResponse {
+  // Unset when there is nothing to claim: the queue is empty, or its head is
+  // already running under a live claim.
+  QueuedMessage entry = 1;
+  // True when nothing was claimed because the queue is paused. Distinct from an
+  // empty queue: a drainer must keep polling rather than conclude it is done.
+  bool paused = 2;
+}
+
+message HeartbeatQueuedMessageRequest {
+  string session_id = 1;
+  string entry_id = 2;
+  string owner = 3;
+}
+message HeartbeatQueuedMessageResponse {}
+
+// MarkQueuedMessageStarted records the turn a claimed entry produced, and is
+// what makes delivery at-most-once. Call it as soon as the turn id is known,
+// BEFORE the turn completes: if the drainer then dies, whoever reclaims can see
+// the message was already sent and retire it instead of sending it twice.
+message MarkQueuedMessageStartedRequest {
+  string session_id = 1;
+  string entry_id = 2;
+  string owner = 3;
+  string turn_id = 4;
+}
+message MarkQueuedMessageStartedResponse {}
+
+message RetireQueuedMessageRequest {
+  string session_id = 1;
+  string entry_id = 2;
+  string owner = 3;
+}
+message RetireQueuedMessageResponse {}
+
+// ReleaseQueuedMessage hands a claimed entry back without running it, keeping
+// its position — for a drainer shutting down cleanly, rather than letting its
+// lease lapse and stalling the queue until it does.
+message ReleaseQueuedMessageRequest {
+  string session_id = 1;
+  string entry_id = 2;
+  string owner = 3;
+}
+message ReleaseQueuedMessageResponse {}
+
+message ChatStreamRequest {
+  repeated Message messages = 1;
+  CallOptions options = 2;
+  // Session key for durable chat state in llmd. Required: ChatStream rejects an empty or unset session_id.
+  // For stateless calls without a session, use Complete or CompleteStream instead.
+  // Turns are persisted (if a store exists), GetSessionHistory applies, and prior messages may be
+  // prepended from the session store when prior turns exist; stateful providers also use llmd_provider_session_sync
+  // for Cursor --resume and incremental delivery when the DB repo is configured.
+  optional string session_id = 3;
+  // Ignored: llmd always persists this turn to the session store when session_id is set (and a store exists).
+  bool persist_session = 4;
+  // Structured system prompt sections (client-authored). When set, llmd renders provider-specific
+  // prompt body and MDC files from these sections instead of trusting flat system message content alone.
+  repeated SystemPromptSection system_prompt_sections = 6;
+  // Documents in scope for this turn (open plan/design/idea, etc.). the client sends the
+  // full current body each turn; llmd dedups by content hash and injects full-on-first /
+  // full-on-change / omit-when-unchanged into the outbound model messages. The persisted
+  // user content is never mutated by this.
+  repeated TrackedDocument tracked_documents = 7;
+  // First-turn-only session context block (graph seed, neighborhood overview). Persisted
+  // once on the session and injected — frozen — as the lead context on the first outbound
+  // model message. Ignored on non-first turns. Never merged into persisted user content.
+  optional string initial_seed = 8;
+  // Repo-relative paths the initial seed surfaced (neighborhood seed matched files +
+  // entry points). Folded once into the session graph-usage accumulator alongside the
+  // write-once initial_seed persist, so a later act on a seeded path earns a tier "seed"
+  // attribution. Ignored when initial_seed is absent/already persisted.
+  repeated string initial_seed_graph_paths = 9;
+  // Per-turn switches (e.g. disable_tools). The queue drainer copies a queued
+  // entry's turn_options here.
+  TurnOptions turn_options = 10;
+  // Per-turn key/value context passed unchanged to every tool call in the turn
+  // (ExecutorToolCall.tool_context). When unset or empty, the session's
+  // EnsureSessionRequest.tool_context map is used instead.
+  map<string, string> tool_context = 11;
+}
+
+// One logical block of the assistant system prompt (stable id + provider-neutral content).
+message SystemPromptSection {
+  string id = 1;
+  string content = 2;
+  repeated string tags = 3;
+}
+
+// Delivers the result for one client-delegated tool wait (see EvToolExecutionStarted.client_wait_nonce).
+message SubmitToolResultsRequest {
+  optional string session_id = 1;
+  string client_wait_nonce = 2;
+  string tool_call_id = 3;
+  string content = 4;
+  bool is_error = 5;
+  // When true (and is_error is false), the agent loop finishes the current
+  // round of tool calls and then ends the turn instead of re-querying the
+  // model — e.g. a tool that proposes a change and waits for user approval.
+  // Ignored on error results.
+  bool ends_turn = 6;
+}
+
+message SubmitToolResultsResponse {}
+
+// ---------------------------------------------------------------------------
+// Token accounting and tool result expansion
+// ---------------------------------------------------------------------------
+
+message GetSessionTokenUsageRequest {
+  string session_id = 1;
+}
+
+message GetSessionTokenUsageResponse {
+  int64 total_provider_in_toks = 1;
+  int64 total_provider_out_toks = 2;
+  int64 total_original_tokens = 3;
+  int64 total_compressed_tokens = 4;
+}
+
+// One passive, out-of-band decoration attached to a turn or a single tool
+// result: an opaque kind+uri pointer, never interpreted by llmd (see
+// ToolResultAttachment). Decorations never appear in message content; clients
+// join them onto the transcript by turn_seq (turn-level) or tool_call_id
+// (result-level) and resolve uri against whatever system emitted it.
+message TurnDecoration {
+  // Canonical llmd_session_turns.turn_seq; 0 when unknown.
+  int64 turn_seq = 1;
+  // Legacy/external turn id ("" for MCP-authored rows).
+  string turn_id = 2;
+  // "turn" or "tool_result".
+  string target = 3;
+  // Set when target == "tool_result".
+  string tool_call_id = 4;
+  // Decoration type discriminator (e.g. "host_provenance", "entity_reference").
+  string kind = 5;
+  // Opaque pointer to the emitter-owned data this decoration references.
+  string uri = 6;
+  int64 created_at_unix = 8;
+}
+
+message ListTurnDecorationsRequest {
+  string session_id = 1;
+}
+
+message ListTurnDecorationsResponse {
+  // Insertion order (replayable in turn order via turn_seq).
+  repeated TurnDecoration decorations = 1;
+}
+
+// Per-turn token usage entry keyed by the persisted assistant message id.
+message TurnUsageEntry {
+  string message_id = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  int64 cache_read_tokens = 4;
+  int64 cache_write_tokens = 5;
+  // Compression accounting: populated when tool-result compression fired during
+  // this turn. original_tokens is the pre-compression count; compressed_tokens
+  // is the wire count actually sent. Both are 0 when no compression occurred.
+  int64 original_tokens = 6;
+  int64 compressed_tokens = 7;
+  // Canonical llmd_session_turns.turn_seq for this turn's message (from
+  // llmd_chat_messages.turn_seq); 0 when unknown. Lets clients join turn-level
+  // graph decorations (keyed by turn_seq) onto the same bubble as the tokens.
+  int64 turn_seq = 8;
+  // Wall time, in ms, of the model call that produced this message; 0 when unknown.
+  int64 model_duration_ms = 9;
+}
+
+message GetSessionTurnBreakdownRequest {
+  string session_id = 1;
+}
+
+message GetSessionTurnBreakdownResponse {
+  repeated TurnUsageEntry turns = 1;
+  // total_input_tokens is the combined new + cache_read + cache_write total.
+  int64 total_input_tokens = 2;
+  int64 total_output_tokens = 3;
+  int64 total_cache_read_tokens = 4;
+  int64 total_cache_write_tokens = 5;
+}
+
+// Aggregated token metrics for the calling scope.
+// When all_scopes is true the response sums across every scope in the caller's
+// tenant (overview surfaces only) instead of just the caller's scope.
+message GetScopeTokenMetricsRequest {
+  bool all_scopes = 1;
+}
+
+message GetScopeTokenMetricsResponse {
+  int64 total_provider_in_toks = 1;
+  int64 total_provider_out_toks = 2;
+  // Input-side compression: original (pre) vs compressed wire (post) tokens.
+  int64 total_original_tokens = 3;
+  int64 total_compressed_tokens = 4;
+  int64 compressed_result_count = 5;
+  // Provider cache accounting (measured): tokens served from / written to cache.
+  int64 total_cache_read_toks = 6;
+  int64 total_cache_write_toks = 7;
+}
+
+// One hourly bucket of actual provider token usage (measured spend). The client
+// re-aggregates these into coarser buckets (6h/day/week) based on the span.
+message TokenUsageBucket {
+  // Unix epoch seconds at the UTC hour start of the bucket.
+  int64 bucket_unix = 1;
+  int64 provider_in_toks = 2;
+  int64 provider_out_toks = 3;
+  int64 cache_read_toks = 4;
+  int64 cache_write_toks = 5;
+}
+
+message GetTokenUsageTimelineRequest {
+  bool all_scopes = 1;
+}
+
+message GetTokenUsageTimelineResponse {
+  repeated TokenUsageBucket buckets = 1;
+}
+
+// One daily bucket of input-side compression savings.
+message TokenSavingsBucket {
+  // Unix epoch seconds at UTC midnight of the bucket day.
+  int64 day_unix = 1;
+  int64 original_tokens = 2;   // what would have been sent (pre-compression)
+  int64 compressed_tokens = 3; // what was actually sent (post-compression)
+}
+
+message GetTokenSavingsTimelineRequest {
+  bool all_scopes = 1;
+}
+
+message GetTokenSavingsTimelineResponse {
+  repeated TokenSavingsBucket buckets = 1;
+}
+
+message GetToolResultOriginalRequest {
+  string tool_call_id = 1;
+  optional string session_id = 2;
+}
+
+message GetToolResultOriginalResponse {
+  string original_content = 1;
+  bool found = 2;
+}
+
+message UpdateSessionCompressionSettingsRequest {
+  string session_id = 1;
+  // Master switch: false = compression disabled for this session regardless of
+  // the mechanism flags below (which are still persisted so they survive a toggle).
+  optional bool enabled = 2;
+  // Threshold: token count above which to compress (default 2000)
+  optional int64 threshold = 3;
+  // Aging: keep this many most-recent tool results in full; older ones collapse
+  // to expandable stale references. 0 = aging disabled. Absent = default (6).
+  optional int64 age_keep = 4;
+  // When true, large `search` tool results are summarized via extractive
+  // selection. Absent = leave unchanged.
+  optional bool extractive_search = 5;
+  // Lossless minify + dedup of tool results. Absent = leave unchanged.
+  optional bool minify_dedup = 6;
+}
+
+message UpdateSessionCompressionSettingsResponse {
+  bool success = 1;
+  optional bool enabled = 2;
+  optional int64 threshold = 3;
+  optional int64 age_keep = 4;
+  optional bool extractive_search = 5;
+  optional bool minify_dedup = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Session metadata (Tier 2: session-scoped state)
+// ---------------------------------------------------------------------------
+
+message TodoItem {
+  string id = 1;
+  string title = 2;
+  optional int64 completed_at = 3;
+}
+
+message SessionMeta {
+  string title = 1;
+  string todos_json = 2;
+  string attributes_json = 3;
+  int64 cursor_pos = 4;
+  string session_id = 5;
+  string chat_surface = 6;
+  int64 created_at = 7;  // unix millis
+  int64 updated_at = 8;  // unix millis
+  // Per-session model selection, owned by UpdateSessionLlm (never written via
+  // SetSessionMeta). Surfaced here read-only so the client can rehydrate the
+  // session's provider/model after a restart.
+  string provider_id = 9;
+  string default_model = 10;
+  // Arbitrary caller-defined k/v labels. Read-only here: SetSessionMeta IGNORES
+  // this field, because a meta write is wholesale and would silently drop tags
+  // set by another caller. Use UpdateSessionTags (merge) or
+  // ReplaceSessionTags (wholesale, explicit) to write them.
+  map<string, string> tags = 11;
+  // Fork lineage (see ForkSession). Read-only: SetSessionMeta IGNORES these.
+  // Informational labels only — a fork owns a full copy of its data, and the
+  // source may since have been deleted. Empty when the session was not forked;
+  // forked_from_message_id is also empty when the whole history was cloned.
+  string forked_from_session_id = 12;
+  string forked_from_message_id = 13;
+  // The current turn's agent-authored status headline (set_status). Read-only:
+  // SetSessionMeta IGNORES it. Turn-scoped: llmd clears it when a user turn
+  // starts, so it is empty until the running (or last) turn sets one. A client
+  // seeds its status from this on (re)connect; EvSessionStatus updates it live.
+  string status = 14;
+}
+
+// SessionSummary is the lightweight per-session row returned by ListSessions:
+// enough to render the session list (id, title, surface, recency) without
+// fetching transcripts.
+message SessionSummary {
+  string session_id = 1;
+  string title = 2;
+  string chat_surface = 3;
+  int64 created_at = 4;  // unix millis
+  int64 updated_at = 5;  // unix millis
+  int64 cursor_pos = 6;
+  // Unix millis of the newest persisted chat message in this session, derived
+  // from MAX(llmd_chat_messages.created_at) — NOT a stored column. 0 when the
+  // session has no messages yet.
+  //
+  // This is deliberately distinct from updated_at: updated_at is bumped by any
+  // session mutation (title edit, cursor advance, compression settings), so it
+  // answers "last touched", while last_message_at answers "last said something",
+  // which is what a recency-ordered session list actually wants.
+  int64 last_message_at = 7;
+  // Arbitrary caller-defined k/v labels (see ListSessionsRequest.tag_filters).
+  map<string, string> tags = 8;
+  // Fork lineage; see SessionMeta.forked_from_session_id.
+  string forked_from_session_id = 9;
+  string forked_from_message_id = 10;
+}
+
+// Sort key for ListSessions.
+enum SessionSortField {
+  // Defaults to SESSION_SORT_FIELD_LAST_MESSAGE_AT.
+  SESSION_SORT_FIELD_UNSPECIFIED = 0;
+  // Newest chat message first. Sessions with no messages fall back to their
+  // created_at for ordering purposes (their last_message_at is still 0).
+  SESSION_SORT_FIELD_LAST_MESSAGE_AT = 1;
+  SESSION_SORT_FIELD_CREATED_AT = 2;
+  // Last mutation of any kind (see SessionSummary.last_message_at).
+  SESSION_SORT_FIELD_UPDATED_AT = 3;
+  // Case-insensitive title order; defaults to ascending.
+  SESSION_SORT_FIELD_TITLE = 4;
+}
+
+enum SessionSortOrder {
+  // Descending for the timestamp fields, ascending for TITLE.
+  SESSION_SORT_ORDER_UNSPECIFIED = 0;
+  SESSION_SORT_ORDER_ASC = 1;
+  SESSION_SORT_ORDER_DESC = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  SessionMeta meta = 1;
+}
+
+message SetSessionMetaRequest {
+  string session_id = 1;
+  SessionMeta meta = 2;
+}
+
+message SetSessionMetaResponse {
+  bool success = 1;
+}
+
+message ListSessionsRequest {
+  // Defaults to last-message-first (see SessionSortField).
+  SessionSortField sort_by = 1;
+  SessionSortOrder order = 2;
+  // Max rows to return. 0 → 50. Values above 500 are clamped to 500 rather
+  // than rejected, so a client asking for "everything" gets a capped page plus
+  // has_more instead of an error.
+  int32 page_size = 3;
+  // Rows to skip. Offset paging (not a keyset cursor) because the sort key is
+  // caller-selectable and one of them (last_message_at) is derived, so there is
+  // no single stable column to seek on.
+  int32 offset = 4;
+  // Optional exact-match filter on SessionSummary.chat_surface (build, ask,
+  // debug, doc, pair). Empty = all surfaces.
+  string chat_surface = 5;
+  // Optional tag filter: a session must carry ALL of these tags to match (AND).
+  // A value of "" matches on key presence with any value.
+  //
+  // Unlike chat_surface, this is NOT index-backed — it scans the scope's
+  // sessions. That is a deliberate tradeoff (tag filtering is rare next to
+  // surface filtering); combine it with chat_surface when you can, so the
+  // indexed predicate narrows the set first.
+  map<string, string> tag_filters = 6;
+}
+
+message ListSessionsResponse {
+  // One page of session rows in the requested order (default: newest message first).
+  repeated SessionSummary sessions = 1;
+  // Total rows matching chat_surface, ignoring page_size/offset.
+  int64 total_count = 2;
+  // offset + len(sessions), valid as the next request's offset. 0 when has_more is false.
+  int32 next_offset = 3;
+  bool has_more = 4;
+}
+
+// UpdateSessionTags merges tags into a session, leaving unmentioned keys alone.
+// A key whose value is "" is DELETED. Merge rather than replace so a caller
+// setting one tag cannot clobber tags it never knew about; set replace = true
+// for wholesale "these tags and no others" semantics.
+message UpdateSessionTagsRequest {
+  string session_id = 1;
+  map<string, string> tags = 2;
+  // When true, tags not present in `tags` are removed. Empty-valued keys are
+  // simply absent from the result rather than acting as deletes.
+  bool replace = 3;
+}
+
+message UpdateSessionTagsResponse {
+  // The session's tags after the update.
+  map<string, string> tags = 1;
+}
+
+message GetStorageStatsRequest {
+  int32 largest_sessions_limit = 1;
+}
+
+message StorageTableStat {
+  string name = 1;
+  int64 bytes = 2; // table including its indexes
+}
+
+message StorageSessionStat {
+  string session_id = 1;
+  string title = 2;
+  string chat_surface = 3;
+  int64 message_count = 4;
+  int64 bytes = 5;
+  int64 last_message_unix_ms = 6;
+  string scope_id = 7; // empty for the global scope
+}
+
+message GetStorageStatsResponse {
+  int64 database_bytes = 1;
+  int64 free_bytes = 2; // freelist pages, reclaimable by VACUUM
+  repeated StorageTableStat tables = 3;
+  int64 session_count = 4;
+  repeated StorageSessionStat largest_sessions = 5;
+}
+
+message DeleteSessionsRequest {
+  repeated string session_ids = 1;
+}
+
+message DeleteSessionsResponse {
+  int32 deleted = 1;
+}
+
+message CompactRequest {}
+
+message CompactResponse {
+  string run_id = 1;
+  int64 bytes_before = 2;
+  int64 bytes_after = 3;
+  int64 events_removed = 4;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {
+  bool success = 1;
+}
+
+// ForkSession clones a session into a new, fully independent session (no data
+// is shared with or read through to the source). The clone is inclusive of
+// up_to_message_id and extends to just before the next user/assistant message,
+// so an assistant message's tool results always come with it. Empty
+// up_to_message_id clones the whole history.
+//
+// Copied: session settings (provider/model, tools, prompt sections, tool policy,
+// compression, tags, surface, title) and the history plus its per-turn data
+// (turn metadata, tool-result sidecars, decorations, tracked-document versions).
+// Not copied: provider-side session state — the fork's first turn replays its
+// history as a fresh provider session, exactly like a provider/model switch —
+// nor the event log, cache, draft or queue.
+//
+// Errors: NOT_FOUND (unknown source or message), ALREADY_EXISTS (new_session_id
+// taken), FAILED_PRECONDITION (the cloned range reaches into a turn that is
+// still running — fork from an earlier message or wait for the turn to finish).
+message ForkSessionRequest {
+  string source_session_id = 1;
+  // Inclusive cutoff. Empty = clone the full history.
+  string up_to_message_id = 2;
+  // Optional id for the fork; the server mints one when empty.
+  string new_session_id = 3;
+  // Optional title override; defaults to the source session's title.
+  string title = 4;
+}
+
+message ForkSessionResponse {
+  string session_id = 1;
+  // Distinct messages copied (an assistant message spans several stored rows).
+  int32 copied_messages = 2;
+}
+
+message SetSessionCursorRequest {
+  string session_id = 1;
+  int64 cursor_pos = 2;
+}
+
+message SetSessionCursorResponse {
+  bool success = 1;
+}
+
+message AdvanceSessionCursorRequest {
+  string session_id = 1;
+  int64 delta = 2;
+}
+
+message AdvanceSessionCursorResponse {
+  int64 new_cursor_pos = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Remote tool execution: ToolProviderService.Connect
+// ---------------------------------------------------------------------------
+// The full protocol description lives on ToolProviderToServer (attached there
+// so it appears in generated docs, e.g. `go doc llmv1.ToolProviderToServer`).
+
+// Legacy first frame (see ToolProviderToServer): registers this stream as
+// the delegate_to_client transport for the request's (tenant, scope).
+message ToolProviderHello {
+  // Free-form provider label. llmd does not currently use it for routing,
+  // which is keyed only by (tenant, scope) from request metadata.
+  string provider_id = 1;
+  // Tenant and scope come from request metadata (llmd-tenant-id / llmd-scope-id).
+  // Must equal the shared secret configured on llmd
+  // (llmdhost.Config.ToolProviderSecret); with none configured every hello is refused.
+  optional string shared_secret = 3;
+}
+
+// Legacy: llmd → provider request to run a delegate_to_client tool.
+message ToolExecutionInvoke {
+  string execution_id = 1;
+  reserved 2;
+  reserved "agent_id";
+  optional string session_id = 3;
+  string tool_id = 4;
+  string arguments_json = 5;
+  optional string client_session_id = 7;
+}
+
+// ToolResultAttachment is a passive, out-of-band pointer a delegated tool
+// attaches to its result: llmd stores kind+uri verbatim and never interprets
+// either. The emitting system owns the uri scheme (e.g. "host://provenance/<id>",
+// "owlbert://entity/<id>") and all data/semantics (confidence, counts, labels,
+// …) live at whatever the uri resolves to, not on the wire here. Neither the
+// model nor the user ever sees these; they ride beside the turn for an
+// interested client to resolve later.
+message ToolResultAttachment {
+  // Discriminator an interested client filters on (e.g. "host_provenance",
+  // "entity_reference"). Opaque to llmd; the emitter owns the vocabulary.
+  string kind = 1;
+  // Opaque pointer to the emitter-owned data this attachment references.
+  string uri = 2;
+}
+
+// Legacy: provider → llmd reply to a ToolExecutionInvoke, keyed by execution_id.
+message ToolExecutionResult {
+  string execution_id = 1;
+  string tool_id = 2;
+  string content = 3;
+  bool is_error = 4;
+  // Optional opaque, tool-provided content-identity key for transport dedup
+  // (e.g. read_code range coverage). Empty ⇒ this result is never deduped.
+  optional string dedup_key = 5;
+  // Optional passive attachments (see ToolResultAttachment). Empty ⇒ none.
+  repeated ToolResultAttachment attachments = 6;
+  // See SubmitToolResultsRequest.ends_turn. Ignored when is_error is true.
+  bool ends_turn = 7;
+}
+
+// --- Executor stream protocol (preferred; see ToolProviderToServer) ---
+
+// First frame from an executor: identifies it and declares the tools it serves.
+//
+// Registration is tenant-wide, keyed by (tenant from llmd-tenant-id metadata,
+// executor_id); llmd-scope-id does not narrow it. Send the shared secret in
+// metadata key "x-llmd-tool-provider-secret". llmd answers with
+// ExecutorHelloAck. When the stream ends, the tools stay registered without an
+// owner and pending calls fail as disconnected.
+message ExecutorHello {
+  string executor_id = 1;
+  // Tools to register. Each must have a name and
+  // execution = executor{executor_id: <this hello's executor_id>}; otherwise
+  // it is listed in ExecutorHelloAck.rejected_tools with a reason.
+  repeated ToolDefinition tools = 2;
+  // Maximum concurrent calls the executor accepts; 0 ⇒ unlimited.
+  uint32 max_concurrency = 3;
+  string version = 4;
+  // Per-process instance identity; a hello with a new instance_id for the
+  // same (tenant, executor_id) supersedes the previous stream (its pending
+  // calls fail as disconnected and it is closed with ABORTED). Keep it stable
+  // across reconnects of one process; empty ⇒ llmd assigns a random one.
+  string instance_id = 5;
+}
+
+message RejectedTool {
+  string name = 1;
+  string reason = 2;
+}
+
+// llmd's reply to ExecutorHello: always the first server frame on an executor stream.
+message ExecutorHelloAck {
+  string executor_id = 1;
+  repeated string accepted_tools = 2;
+  repeated RejectedTool rejected_tools = 3;
+  // Maximum serialized ToolCallResult size llmd accepts per tool call; a larger
+  // result is replaced by an error result for that call.
+  uint64 max_result_bytes = 4;
+}
+
+enum ToolCallOrigin {
+  TOOL_CALL_ORIGIN_UNSPECIFIED = 0;
+  TOOL_CALL_ORIGIN_MODEL = 1;
+  TOOL_CALL_ORIGIN_CLIENT = 2;
+  TOOL_CALL_ORIGIN_SYSTEM = 3;
+}
+
+// A call dispatched to an executor. Named ExecutorToolCall because llm.v1.ToolCall
+// is the model's tool-call message.
+//
+// Scope contract: executor registration is tenant-wide, so the stream says
+// nothing about which scope a call belongs to. The call carries it instead:
+// (tenant_id, scope_id) is the calling session's resolved scope. Reply with
+// exactly one ToolCallResult for call_id; a ToolCallCancel for call_id means
+// llmd stopped waiting.
+message ExecutorToolCall {
+  string call_id = 1;
+  string tool_name = 2;
+  string arguments_json = 3;
+  string session_id = 4;
+  string tenant_id = 5;
+  ToolCallOrigin origin = 6;
+  // Deadline llmd enforces for this call (tool's executor.max_duration_seconds,
+  // default 600).
+  uint32 max_duration_seconds = 7;
+  // Scope of the calling session within tenant_id (llmd-scope-id). Empty when
+  // the call has no resolved scope.
+  string scope_id = 8;
+  // Chat turn the call belongs to, when known (the id ToolCallCancel
+  // reason "turn_cancelled" refers to). Empty for calls outside a turn.
+  string turn_id = 9;
+  // Key/value context supplied by the client (ChatStreamRequest.tool_context,
+  // else EnsureSessionRequest.tool_context), passed unchanged to every tool
+  // call in the turn. Empty when none was provided.
+  map<string, string> tool_context = 10;
+}
+
+// llmd → executor: stop work on call_id; llmd no longer waits for its result.
+message ToolCallCancel {
+  string call_id = 1;
+  // "turn_cancelled" (turn aborted), "deadline" (max_duration_seconds
+  // elapsed), or "cancelled" (caller context ended).
+  string reason = 2;
+}
+
+message ToolCallOutput {
+  string content = 1;
+  bool is_error = 2;
+  optional string dedup_key = 3;
+  repeated ToolResultAttachment attachments = 4;
+  // See SubmitToolResultsRequest.ends_turn. Ignored when is_error is true.
+  bool ends_turn = 5;
+  // Display-only cards (an image, a chart; see llmd/visualcards) llmd puts
+  // in the calling session right after this tool call, as session
+  // attachments anchored to it. after_tool_call_id is set by llmd and any
+  // value here is ignored. Unlike `attachments` (passive kind+uri pointers
+  // nobody renders), these are shown to the user; the model never sees their
+  // payload_json. Ignored when is_error is true; if they cannot be shown, the
+  // call is reported to the model as failed.
+  repeated MessageAttachment cards = 6;
+}
+
+message ToolCallFailure {
+  string code = 1;
+  string message = 2;
+}
+
+message ToolCallResult {
+  string call_id = 1;
+  oneof outcome {
+    ToolCallOutput output = 2;
+    ToolCallFailure failure = 3;
+  }
+}
+
+// Host → llmd frames on ToolProviderService.Connect, and the reference for
+// both protocols that stream carries. A tool host opens Connect to llmd (host =
+// gRPC client). The first frame must be executor_hello (preferred) or hello
+// (legacy); it selects the protocol for the whole stream, and any other first
+// frame is refused with INVALID_ARGUMENT.
+//
+// 1. Executor protocol (PREFERRED; use it to declare and serve tools from
+// another process or Go module). Go hosts should use the public
+// github.com/johnewart/pyxis/toolexecutor client rather than speaking it by
+// hand.
+//
+//	host → llmd  ExecutorHello{executor_id, tools[], max_concurrency, version, instance_id}  (first frame)
+//	llmd → host  ExecutorHelloAck{accepted_tools, rejected_tools, max_result_bytes}
+//	llmd → host  ExecutorToolCall{call_id, tool_name, arguments_json, session_id, tenant_id, origin, max_duration_seconds}
+//	llmd → host  ToolCallCancel{call_id, reason}
+//	host → llmd  ToolCallResult{call_id, output | failure}  (exactly one per call)
+//
+// Auth: the tenant comes from llmd-tenant-id request metadata. The shared
+// secret configured on llmd (llmdhost.Config.ToolProviderSecret; the
+// standalone binary reads LLMD_TOOL_PROVIDER_SHARED_SECRET) is sent in metadata
+// key "x-llmd-tool-provider-secret". If llmd has no secret configured, every
+// registration is refused (FAILED_PRECONDITION).
+//
+// Declaring tools: list them in ExecutorHello.tools, each with
+// execution = executor{executor_id} equal to the hello's executor_id. llmd
+// rejects (with a reason in ExecutorHelloAck.rejected_tools) a tool that has no
+// name, is declared twice in the hello, collides with an inline builtin served
+// by the llmd host, is already owned by a different executor in the tenant, has
+// no executor binding, or whose binding's executor_id differs from the hello.
+// An empty tenant or executor_id rejects every tool.
+//
+// Scope contract: registration is keyed by (tenant, executor_id) and is
+// TENANT-WIDE: one stream serves every scope/workspace in the tenant. Each
+// ExecutorToolCall carries the calling session's tenant_id, scope_id and
+// session_id, so the host binds per-scope state from the call, not the stream.
+// scope_id is empty when the call has no resolved scope (and from llmd builds
+// that predate the field).
+//
+// Lifecycle:
+//   - Stream ends: pending calls fail as "disconnected, outcome unknown"; the
+//     tools stay registered without an owner (still advertised to sessions),
+//     and calls to them fail fast with "executor not attached" until an
+//     executor with that id says hello again.
+//   - A hello with a new instance_id for the same (tenant, executor_id)
+//     supersedes the old stream: its pending calls fail as disconnected and it
+//     is closed with ABORTED. An empty instance_id is replaced by a random one,
+//     so every reconnect then supersedes.
+//   - Turn abort: llmd sends ToolCallCancel{reason: "turn_cancelled"} for each
+//     in-flight call of the turn and refuses new calls for that turn.
+//   - Deadline: each call is bounded by the tool's
+//     executor.max_duration_seconds (default 600s), echoed in
+//     ExecutorToolCall.max_duration_seconds. On expiry llmd sends
+//     ToolCallCancel{reason: "deadline"} ("cancelled" when the caller's context
+//     ends first) and stops waiting.
+//   - Result size: a ToolCallResult whose serialized size exceeds
+//     max_result_bytes (1 MiB) becomes an error result for that call; the
+//     stream stays open.
+//
+// 2. Legacy provider protocol (ToolProviderHello / ToolExecutionInvoke /
+// ToolExecutionResult). Registers a stream for the exact (tenant, scope) from
+// llmd-tenant-id / llmd-scope-id metadata and declares no tools. llmd still
+// uses it as the transport for delegate_to_client tools: the chat loop and the
+// MCP server send ToolExecutionInvoke on it when a stream is connected for the
+// scope, and the provider replies with ToolExecutionResult keyed by
+// execution_id. The secret goes in ToolProviderHello.shared_secret. New
+// integrations should use the executor protocol.
+message ToolProviderToServer {
+  oneof frame {
+    ToolProviderHello hello = 1;
+    ToolExecutionResult result = 2;
+    ExecutorHello executor_hello = 3;
+    ToolCallResult tool_call_result = 4;
+  }
+}
+
+// llmd → host frames: invoke (legacy) or executor_hello_ack / tool_call /
+// tool_call_cancel (executor protocol).
+message ToolServerToProvider {
+  oneof frame {
+    ToolExecutionInvoke invoke = 1;
+    ExecutorHelloAck executor_hello_ack = 2;
+    ExecutorToolCall tool_call = 3;
+    ToolCallCancel tool_call_cancel = 4;
+  }
+}
+
+service ToolProviderService {
+  // Bidirectional tool execution stream carrying one of two protocols,
+  // selected by the first host frame (anything else ⇒ INVALID_ARGUMENT):
+  //
+  //   executor_hello (PREFERRED): declare tools tenant-wide and serve them.
+  //     llmd replies ExecutorHelloAck, then sends ExecutorToolCall /
+  //     ToolCallCancel; host replies ToolCallResult. Secret in metadata
+  //     "x-llmd-tool-provider-secret". Go client: package toolexecutor.
+  //   hello (LEGACY ToolProviderHello): per-(tenant, scope) transport for
+  //     delegate_to_client tools; llmd sends ToolExecutionInvoke, host replies
+  //     ToolExecutionResult. Secret in ToolProviderHello.shared_secret.
+  //
+  // Both require llmd-tenant-id metadata and a shared secret configured on
+  // llmd (llmdhost.Config.ToolProviderSecret). See ToolProviderToServer for the full scope contract and
+  // lifecycle.
+  rpc Connect(stream ToolProviderToServer) returns (stream ToolServerToProvider);
+}
+
+// Direct unary invocation of an already-registered builtin tool (the same
+// registry the agent loop draws from). This is a read/execute path through
+// the existing toolregistry/toolexec composition: it never enqueues a
+// graph/index build and never registers a new tool. Unknown tool_ids are
+// refused generically (no enumeration of valid/gated ids in the error).
+message InvokeToolRequest {
+  string tool_id = 1;
+  string arguments_json = 2;
+  // Tenant and scope come from request metadata (llmd-tenant-id / llmd-scope-id).
+  optional string session_id = 4;
+}
+
+message InvokeToolResponse {
+  string result_json = 1;
+  bool is_error = 2;
+  optional string error_message = 3;
+}
+
+service LlmService {
+  // Stateless one-shot completion (no agent / no session); caller supplies the provider+model.
+  rpc GenerateOnce(GenerateOnceRequest) returns (AssistantReply);
+  // Stateless completion over an explicit message list (no agent / no session).
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // Streaming variant of Complete: text deltas followed by a final frame with the full reply.
+  rpc CompleteStream(CompleteRequest) returns (stream CompleteStreamResponse);
+  rpc ChatStream(ChatStreamRequest) returns (stream ConversationStreamFrame);
+  // Explicit Stop for the session's running turn. Client disconnect never cancels a turn.
+  rpc CancelTurn(CancelTurnRequest) returns (CancelTurnResponse);
+  // Unary invocation of a single already-registered builtin tool, outside any
+  // ChatStream/agent loop. Read/execute only through the existing registry;
+  // never schedules a graph/index build and never registers new tools.
+  rpc InvokeTool(InvokeToolRequest) returns (InvokeToolResponse);
+  rpc SubscribeSessionEvents(SubscribeSessionEventsRequest) returns (stream ConversationStreamFrame);
+  rpc SubmitToolResults(SubmitToolResultsRequest) returns (SubmitToolResultsResponse);
+
+  rpc GetSessionHistory(GetSessionHistoryRequest) returns (GetSessionHistoryResponse);
+  rpc ReplaceSessionHistory(ReplaceSessionHistoryRequest) returns (ReplaceSessionHistoryResponse);
+
+  // Session UI-artifact attachments (ask cards, embedded build runs). the client never opens llmd's
+  // SQLite directly; these RPCs are the only write/read path for the attachment rows. Tenant/scope = llmd-tenant-id / llmd-scope-id metadata.
+  rpc UpsertSessionAttachment(UpsertSessionAttachmentRequest) returns (UpsertSessionAttachmentResponse);
+  rpc DeleteSessionAttachment(DeleteSessionAttachmentRequest) returns (DeleteSessionAttachmentResponse);
+  rpc PatchAssistantMessageContent(PatchAssistantMessageContentRequest) returns (PatchAssistantMessageContentResponse);
+  rpc AnswerAskCard(AnswerAskCardRequest) returns (AnswerAskCardResponse);
+  // Every agent ask card still waiting on the user, across sessions.
+  rpc ListOpenAskCards(ListOpenAskCardsRequest) returns (ListOpenAskCardsResponse);
+  // Ask cards opening and closing, across sessions, as they happen.
+  rpc SubscribeAskCards(SubscribeAskCardsRequest) returns (stream AskCardChange);
+
+  // Session-scoped chat runtime for client chat; utility one-shots use GenerateOnce.
+  rpc EnsureSession(EnsureSessionRequest) returns (EnsureSessionResponse);
+  rpc UpdateSessionLlm(UpdateSessionLlmRequest) returns (UpdateSessionLlmResponse);
+  rpc DestroySession(DestroySessionRequest) returns (DestroySessionResponse);
+  rpc RegisterSessionTool(RegisterSessionToolRequest) returns (RegisterSessionToolResponse);
+  rpc UnregisterSessionTool(UnregisterSessionToolRequest) returns (UnregisterSessionToolResponse);
+  rpc ListSessionTools(ListSessionToolsRequest) returns (ListSessionToolsResponse);
+  // Session-independent: registered tools + this tenant's executor tools.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+
+  // Agent profiles: reusable config bundles (prompt sections, provider/model
+  // defaults, memory flag, tool mapping) resolved at session creation. Sessions
+  // never reference a profile after creation. Static (code-defined) profiles
+  // are read-only — Create/Update/Delete refuse them.
+  rpc CreateAgentProfile(CreateAgentProfileRequest) returns (CreateAgentProfileResponse);
+  rpc UpdateAgentProfile(UpdateAgentProfileRequest) returns (UpdateAgentProfileResponse);
+  rpc DeleteAgentProfile(DeleteAgentProfileRequest) returns (DeleteAgentProfileResponse);
+  rpc GetAgentProfile(GetAgentProfileRequest) returns (GetAgentProfileResponse);
+  rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  // Creates a session from a profile; composes EnsureSession from the profile's
+  // fields plus the request's overrides.
+  rpc CreateSessionFromAgentProfile(CreateSessionFromAgentProfileRequest) returns (CreateSessionFromAgentProfileResponse);
+
+  rpc ListLlmProviders(ListLlmProvidersRequest) returns (ListLlmProvidersResponse);
+  // Static catalog of provider kinds llmd can register (short-code, display name, credential
+  // requirements). Drives "add provider" UI; unrelated to ListLlmProviders, which lists already-
+  // configured provider instances.
+  rpc ListSupportedLlmProviderTypes(ListSupportedLlmProviderTypesRequest) returns (ListSupportedLlmProviderTypesResponse);
+  rpc RefreshLlmProviderModels(RefreshLlmProviderModelsRequest) returns (RefreshLlmProviderModelsResponse);
+  rpc ListLlmCatalogModels(ListLlmCatalogModelsRequest) returns (ListLlmCatalogModelsResponse);
+  rpc RegisterLlmProvider(RegisterLlmProviderRequest) returns (RegisterLlmProviderResponse);
+  rpc UnregisterLlmProvider(UnregisterLlmProviderRequest) returns (UnregisterLlmProviderResponse);
+  // Read back the full stored config of an already-registered provider (view/edit UI).
+  rpc GetLlmProviderConfig(GetLlmProviderConfigRequest) returns (GetLlmProviderConfigResponse);
+  // Replace the full stored config of an already-registered provider; NotFound if it doesn't exist.
+  rpc UpdateLlmProviderConfig(UpdateLlmProviderConfigRequest) returns (UpdateLlmProviderConfigResponse);
+  // Interactive CLI provider auth (e.g. `claude login`) piped through a server-side PTY. See
+  // ProviderAuthCommandStart's doc comment for scope.
+  rpc RunProviderAuthCommand(stream ProviderAuthCommandInput) returns (stream ProviderAuthCommandOutput);
+  // Scan this machine for a CLI provider's binary. See
+  // DiscoverProviderBinariesRequest's doc comment for why this is server-side.
+  rpc DiscoverProviderBinaries(DiscoverProviderBinariesRequest) returns (DiscoverProviderBinariesResponse);
+  // Check a CLI provider config (exists / new enough / signed in / can resume)
+  // without registering it. Unary, so it works over gRPC-Web too -- unlike
+  // RunProviderAuthCommand, which is bidi. See CheckProviderConnectionRequest.
+  rpc CheckProviderConnection(CheckProviderConnectionRequest) returns (CheckProviderConnectionResponse);
+  // Browser-compatible interactive provider auth: the RunProviderAuthCommand
+  // PTY split into unary + server-streaming calls, because gRPC-Web cannot do
+  // bidi. See StartProviderAuthSessionRequest's comment for when to use which.
+  rpc StartProviderAuthSession(StartProviderAuthSessionRequest) returns (StartProviderAuthSessionResponse);
+  rpc StreamProviderAuthOutput(StreamProviderAuthOutputRequest) returns (stream ProviderAuthCommandOutput);
+  rpc SendProviderAuthInput(SendProviderAuthInputRequest) returns (SendProviderAuthInputResponse);
+  rpc EndProviderAuthSession(EndProviderAuthSessionRequest) returns (EndProviderAuthSessionResponse);
+  rpc RegisterUserEmbeddingProvider(RegisterUserEmbeddingProviderRequest) returns (RegisterUserEmbeddingProviderResponse);
+  rpc UnregisterUserEmbeddingProvider(UnregisterUserEmbeddingProviderRequest) returns (UnregisterUserEmbeddingProviderResponse);
+  rpc ListEmbeddingProviders(ListEmbeddingProvidersRequest) returns (ListEmbeddingProvidersResponse);
+
+  // Token accounting and tool result expansion.
+  rpc GetSessionTokenUsage(GetSessionTokenUsageRequest) returns (GetSessionTokenUsageResponse);
+  rpc ListTurnDecorations(ListTurnDecorationsRequest) returns (ListTurnDecorationsResponse);
+  rpc GetSessionTurnBreakdown(GetSessionTurnBreakdownRequest) returns (GetSessionTurnBreakdownResponse);
+  // Scope-wide (or all scopes in the tenant) token + compression-savings rollups for the status bar / overview.
+  rpc GetScopeTokenMetrics(GetScopeTokenMetricsRequest) returns (GetScopeTokenMetricsResponse);
+  rpc GetTokenSavingsTimeline(GetTokenSavingsTimelineRequest) returns (GetTokenSavingsTimelineResponse);
+  rpc GetTokenUsageTimeline(GetTokenUsageTimelineRequest) returns (GetTokenUsageTimelineResponse);
+  // Aggregated token usage (incl. reasoning tokens) filtered by time range and serving provider.
+  rpc QueryUsage(QueryUsageRequest) returns (QueryUsageResponse);
+  // Per-tool call/error counts and min/median/mean/max duration over a time window.
+  rpc QueryToolUsage(QueryToolUsageRequest) returns (QueryToolUsageResponse);
+  rpc GetToolResultOriginal(GetToolResultOriginalRequest) returns (GetToolResultOriginalResponse);
+  rpc UpdateSessionCompressionSettings(UpdateSessionCompressionSettingsRequest) returns (UpdateSessionCompressionSettingsResponse);
+
+  // Session metadata (Tier 2: session-scoped state).
+  // Per-session composer draft (single value; survives UI reload/crash).
+  rpc UpsertSessionDraft(UpsertSessionDraftRequest) returns (UpsertSessionDraftResponse);
+  rpc GetSessionDraft(GetSessionDraftRequest) returns (GetSessionDraftResponse);
+  rpc ClearSessionDraft(ClearSessionDraftRequest) returns (ClearSessionDraftResponse);
+
+  // Per-session message queue. Editing surface (enqueue/list/remove/reorder/
+  // pause) plus the drainer protocol (claim/heartbeat/mark-started/retire/
+  // release). llmd never drains the queue itself; see the message comments above.
+  rpc EnqueueMessage(EnqueueMessageRequest) returns (EnqueueMessageResponse);
+  rpc ListQueue(ListQueueRequest) returns (ListQueueResponse);
+  rpc RemoveQueuedMessage(RemoveQueuedMessageRequest) returns (RemoveQueuedMessageResponse);
+  rpc ReorderQueue(ReorderQueueRequest) returns (ReorderQueueResponse);
+  rpc SetQueuePaused(SetQueuePausedRequest) returns (SetQueuePausedResponse);
+  rpc ClaimNextQueuedMessage(ClaimNextQueuedMessageRequest) returns (ClaimNextQueuedMessageResponse);
+  rpc HeartbeatQueuedMessage(HeartbeatQueuedMessageRequest) returns (HeartbeatQueuedMessageResponse);
+  rpc MarkQueuedMessageStarted(MarkQueuedMessageStartedRequest) returns (MarkQueuedMessageStartedResponse);
+  rpc RetireQueuedMessage(RetireQueuedMessageRequest) returns (RetireQueuedMessageResponse);
+  rpc ReleaseQueuedMessage(ReleaseQueuedMessageRequest) returns (ReleaseQueuedMessageResponse);
+
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc SetSessionMeta(SetSessionMetaRequest) returns (SetSessionMetaResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc UpdateSessionTags(UpdateSessionTagsRequest) returns (UpdateSessionTagsResponse);
+  rpc SetSessionCursor(SetSessionCursorRequest) returns (SetSessionCursorResponse);
+  rpc AdvanceSessionCursor(AdvanceSessionCursorRequest) returns (AdvanceSessionCursorResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  // Storage use of the database, per table and per session.
+  rpc GetStorageStats(GetStorageStatsRequest) returns (GetStorageStatsResponse);
+  // Delete several sessions through the same purge as DeleteSession.
+  rpc DeleteSessions(DeleteSessionsRequest) returns (DeleteSessionsResponse);
+  // Trim leftover events, then VACUUM. One run at a time; callers share it.
+  rpc Compact(CompactRequest) returns (CompactResponse);
+  // Clone a session (optionally up to a message) into a new independent session.
+  rpc ForkSession(ForkSessionRequest) returns (ForkSessionResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Session-scoped opaque key/value cache
+// ---------------------------------------------------------------------------
+// A generic, ephemeral-by-intent K/V store scoped to (tenant, scope, session, namespace).
+// Tools (e.g. read_code range-coverage tracking) use it to remember derivable
+// state across calls within a session — anything stored here must be safe to lose.
+// Values are opaque bytes; llmd never interprets them. Lives in llmd because llmd
+// is a long-lived singleton, so in-process callers and CLI/MCP tool calls share it.
+
+message SessionCacheGetRequest {
+  string session_id = 1;
+  string namespace = 2;
+  string key = 3;
+}
+message SessionCacheGetResponse {
+  bytes value = 1;
+  bool found = 2;
+}
+message SessionCacheSetRequest {
+  string session_id = 1;
+  string namespace = 2;
+  string key = 3;
+  bytes value = 4;
+}
+message SessionCacheSetResponse {
+  bool success = 1;
+}
+message SessionCacheDeleteRequest {
+  string session_id = 1;
+  string namespace = 2;
+  // key empty => delete the entire namespace for the session.
+  string key = 3;
+}
+message SessionCacheDeleteResponse {
+  int64 deleted = 1;
+}
+
+// Classification of a failed provider call.
+enum LlmErrorKind {
+  LLM_ERROR_KIND_UNSPECIFIED = 0;
+  LLM_ERROR_KIND_RATE_LIMITED = 1;
+  LLM_ERROR_KIND_AUTH = 2;
+  LLM_ERROR_KIND_PERMISSION_DENIED = 3;
+  LLM_ERROR_KIND_CONTEXT_LENGTH = 4;
+  LLM_ERROR_KIND_CONTENT_FILTER = 5;
+  LLM_ERROR_KIND_UNAVAILABLE = 6;
+  LLM_ERROR_KIND_TIMEOUT = 7;
+  LLM_ERROR_KIND_INVALID_REQUEST = 8;
+  LLM_ERROR_KIND_UNKNOWN = 9;
+}
+
+// Structured error from an LLM provider call.
+message LlmError {
+  LlmErrorKind kind = 1;
+  LlmProviderType provider_type = 2;
+  // HTTP (or provider) status code; 0 when not applicable.
+  int32 provider_status = 3;
+  bool retryable = 4;
+  // Suggested wait before retry; unset when unknown.
+  google.protobuf.Duration retry_after = 5;
+}
+
+service SessionCacheService {
+  rpc Get(SessionCacheGetRequest) returns (SessionCacheGetResponse);
+  rpc Set(SessionCacheSetRequest) returns (SessionCacheSetResponse);
+  rpc Delete(SessionCacheDeleteRequest) returns (SessionCacheDeleteResponse);
+}

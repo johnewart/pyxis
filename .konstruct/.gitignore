@@ -1,0 +1,14 @@
+# Managed by konstruct. Edit freely; remove this first line to stop konstruct updating it.
+# Everything under .konstruct/ is local state unless listed below.
+*
+!/.gitignore
+!/designs/
+!/designs/**
+!/plans/
+!/plans/**
+!/ideas/
+!/ideas/**
+!/rules/
+!/rules/**
+!/architecture/
+!/architecture/*.md
