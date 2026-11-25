@@ -13,8 +13,9 @@
  * Keeping the four protos listed here in one place is what stops the two
  * transports from drifting.
  *
- * Uses @protobuf-ts/protoc (bundled protoc download) so CI/dev machines do
- * not need protoc on PATH. Override with PROTOC=/path/to/protoc if needed.
+ * protoc resolution: PROTOC=/path/to/protoc if set, else a protoc on PATH
+ * (the same one `make generate` uses), else @protobuf-ts/protoc, which
+ * downloads protoc on first use and so needs network access.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -58,9 +59,30 @@ for (const protoFile of protoFiles) {
   }
 }
 
+function findOnPath(name) {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    // npm run prepends node_modules/.bin, where @protobuf-ts/protoc installs
+    // a `protoc` shim that downloads on first use; skip it to find a real one.
+    if (!dir || dir.split(path.sep).includes('node_modules')) continue;
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // not here; keep looking
+    }
+  }
+  return null;
+}
+
 function resolveProtocCommand() {
   if (process.env.PROTOC) {
     return { command: process.env.PROTOC, prefixArgs: [] };
+  }
+
+  const onPath = findOnPath(process.platform === 'win32' ? 'protoc.exe' : 'protoc');
+  if (onPath) {
+    return { command: onPath, prefixArgs: [] };
   }
 
   const bundled = path.join(
