@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// Sets the version of every @pyxis-llm/* npm package (packages/core, packages/client,
-// and the four packages/cli-<os>-<arch> binary packages) to a single value.
-// Any optionalDependencies pin on a cli-* package is moved in lockstep too;
-// @pyxis-llm/core no longer declares them (the packages are always colocated, never
-// installed from a registry), so today that step finds nothing to update.
+// Sets the version of every @pyxis-llm/* npm package (packages/client,
+// packages/core, packages/react) to a single value. For a release, the file:
+// links between them are pointed at that version too.
 //
 // Usage:
 //   node scripts/set-npm-versions.mjs --dev
@@ -81,10 +79,18 @@ function setVersion(pkgDir, version) {
   const pkgPath = path.join(repoRoot, pkgDir, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   pkg.version = version;
-  if (pkg.optionalDependencies) {
-    for (const dep of Object.keys(pkg.optionalDependencies)) {
-      if (dep.startsWith('@pyxis-llm/cli-')) {
-        pkg.optionalDependencies[dep] = version;
+  // For a real release, sibling @pyxis-llm/* packages linked with file:../x
+  // must point at the released version: npm publishes file: specs verbatim,
+  // which makes the package uninstallable from the registry. Dev runs keep
+  // the local links.
+  if (!isDevVersion(version)) {
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+      const deps = pkg[field];
+      if (!deps) continue;
+      for (const [dep, spec] of Object.entries(deps)) {
+        if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && spec.startsWith('file:')) {
+          deps[dep] = version;
+        }
       }
     }
   }

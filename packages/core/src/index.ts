@@ -138,4 +138,4 @@ export {
   LLMD_ATTACHMENT_KIND_PLUGINS,
   withLlmdAttachmentKindPlugins,
 } from './builtinAttachmentKinds.js';
-// Spawning/locating the llmd binary is Node-only: see `@pyxis-llm/core/node`.
+// Spawning the llmd binary is Node-only: see `@pyxis-llm/core/node`.

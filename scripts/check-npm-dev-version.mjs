@@ -32,6 +32,15 @@ for (const dir of ALL_PACKAGE_DIRS) {
       failed = true;
     }
   }
+
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    for (const [dep, spec] of Object.entries(pkg[field] ?? {})) {
+      if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && spec.startsWith('file:')) {
+        console.error(`${dir}/package.json: ${field}["${dep}"] is a local link (${spec}); it would publish uninstallable`);
+        failed = true;
+      }
+    }
+  }
 }
 
 const pyVersion = readFileSync(path.join(repoRoot, PYPROJECT_PATH), 'utf8').match(
