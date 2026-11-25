@@ -47,13 +47,6 @@ export function freshDevVersion() {
   return `${DEV_MAJOR}.${Math.floor(Date.now() / 1000)}.0`;
 }
 
-export const CLI_PACKAGE_DIRS = [
-  'packages/cli-darwin-arm64',
-  'packages/cli-linux-x64',
-  'packages/cli-linux-arm64',
-  'packages/cli-win32-x64',
-];
-
 // The Python client's pyproject.toml version tracks the @pyxis-llm/* version.
 export const PYPROJECT_PATH = 'packages/python-client/pyproject.toml';
 
@@ -61,5 +54,4 @@ export const ALL_PACKAGE_DIRS = [
   'packages/core',
   'packages/client',
   'packages/react',
-  ...CLI_PACKAGE_DIRS,
 ];

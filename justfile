@@ -60,7 +60,7 @@ integration-embeddings:
 integration-all:
 	go test -tags=integration -count=1 -v ./...
 
-# npm package versioning (packages/core, packages/client, packages/cli-*).
+# npm package versioning (packages/client, packages/core, packages/react).
 # See scripts/set-npm-versions.mjs for the full rules; short version:
 #   npm-version-dev     -> fresh 9999999.<unix-seconds>.0 every run. The
 #                           9999999 major always outranks any published

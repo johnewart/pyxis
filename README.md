@@ -94,8 +94,6 @@ See `cmd/llmd/main.go` for the full list. The SQLite driver uses CGO; see `docs/
 npm install @pyxis-llm/client @pyxis-llm/core @pyxis-llm/react
 ```
 
-The `@pyxis-llm/cli-*` packages (`cli-linux-x64`, `cli-linux-arm64`, `cli-darwin-arm64`, `cli-win32-x64`) carry the `llmd` binary for each platform.
-
 ## Python client
 
 `packages/python-client` is the `pyxis-client` gRPC client:
