@@ -1,0 +1,85 @@
+name: TypeScript packages
+
+# Builds, type-checks and tests @pyxis-llm/client, @pyxis-llm/core and
+# @pyxis-llm/react on every push and pull request.
+#
+# Two jobs:
+#   - unit: builds the three packages, type-checks client, runs the client
+#     unit tests and react's jsdom unit suite. No Go needed.
+#   - e2e: the client and react end-to-end suites, which build llmd from this
+#     checkout and drive it against a built-in fake OpenAI server (no secrets).
+#     They run on every push too, since a Go change can break them.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Build, type-check and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build @pyxis-llm/client
+        working-directory: packages/client
+        run: npm install && npm run build
+      - name: Build @pyxis-llm/core
+        working-directory: packages/core
+        run: npm install && npm run build
+      - name: Build @pyxis-llm/react
+        working-directory: packages/react
+        run: npm install && npm run build
+
+      - name: Type-check @pyxis-llm/client
+        working-directory: packages/client
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: "@pyxis-llm/client unit tests"
+        working-directory: packages/client
+        run: npm test
+      - name: "@pyxis-llm/react unit tests"
+        working-directory: packages/react/e2e
+        run: npm install && npm run test:unit
+
+  e2e:
+    name: End-to-end tests against llmd
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Toolchain (CGO)
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Build @pyxis-llm/client
+        working-directory: packages/client
+        run: npm install && npm run build
+      - name: Build @pyxis-llm/core
+        working-directory: packages/core
+        run: npm install && npm run build
+      - name: Build @pyxis-llm/react
+        working-directory: packages/react
+        run: npm install && npm run build
+
+      - name: "@pyxis-llm/client end-to-end tests"
+        working-directory: packages/client/e2e
+        run: npm install && npm test
+      - name: "@pyxis-llm/react end-to-end tests"
+        working-directory: packages/react/e2e
+        run: npm install && npm test

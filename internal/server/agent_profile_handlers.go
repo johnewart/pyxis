@@ -263,7 +263,16 @@ func (s *LlmServer) CreateAgentProfile(ctx context.Context, req *llmv1.CreateAge
 			"%s failed: scope=%s profile=%q name=%q err=%v", op, sc.String(), p.ID, p.Name, err)
 		return nil, agentProfileRepoStatus(err)
 	}
-	return &llmv1.CreateAgentProfileResponse{Profile: p.ToProto()}, nil
+	// Return the row as stored (as UpdateAgentProfile does), not the request:
+	// the store normalizes fields such as an unspecified tool policy, and the
+	// response must match what Get and List return for the same profile.
+	stored, err := repo.Get(ctx, sc, p.ID)
+	if err != nil {
+		llmdlog.Stdout(agentProfileLogModule, llmdlog.LevelWarn,
+			"%s: re-read after create failed: scope=%s profile=%q err=%v", op, sc.String(), p.ID, err)
+		return nil, agentProfileRepoStatus(err)
+	}
+	return &llmv1.CreateAgentProfileResponse{Profile: stored.ToProto()}, nil
 }
 
 // UpdateAgentProfile replaces a dynamic profile wholesale (like

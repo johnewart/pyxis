@@ -1,19 +1,19 @@
-name: release-npm
+name: Publish to npm
 
 # Builds and publishes the JS libraries @pyxis-llm/client, @pyxis-llm/core and
 # @pyxis-llm/react publicly to npm (registry.npmjs.org, scope @pyxis-llm),
 # using the NPM_TOKEN repository secret. The llmd binary is not built or
 # published here (go-ci.yml builds it for testing).
 #
-# Trigger: publishing a GitHub Release (tag name, e.g. v1.2.3, becomes the
-# published npm version, leading "v" stripped) or a manual dispatch with a
-# version input (or run on a tag). scripts/set-npm-versions.mjs keeps every
-# @pyxis-llm/* version in lockstep and points the file: links between them at
-# that version.
+# Trigger: pushing a v* tag (the tag, e.g. v1.2.3, becomes the published npm
+# version, leading "v" stripped), or a manual run with a version input (or on
+# a tag). Creating a GitHub Release also pushes its tag, so that publishes too,
+# exactly once. scripts/set-npm-versions.mjs keeps every @pyxis-llm/* version
+# in lockstep and points the file: links between them at that version.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
           scope: "@pyxis-llm"
 
@@ -62,11 +62,10 @@ jobs:
       - name: Set npm package versions
         env:
           INPUT_VERSION: ${{ inputs.version }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          version="${INPUT_VERSION:-$RELEASE_TAG}"
+          version="$INPUT_VERSION"
           if [ -z "$version" ] && [ "$REF_TYPE" = "tag" ]; then
             version="$REF_NAME"
           fi
