@@ -1,5 +1,5 @@
 packages:
-  llmd:
+  pyxisd:
     root: .
     dependencies:
       build:

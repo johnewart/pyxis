@@ -6,10 +6,10 @@ import (
 
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	conversationevents "github.com/johnewart/pyxis/internal/assistant/conversationevents"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/serverutil"
 	"github.com/johnewart/pyxis/internal/toolmerge"
 	"github.com/johnewart/pyxis/llmdlog"
+	"github.com/johnewart/pyxis/policyhook"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -47,7 +47,11 @@ func (s *LlmServer) policyGuard() *policyhook.Guard {
 }
 
 func policyScopeOf(sc serverutil.Scope) *llmv1.PolicyScope {
-	return &llmv1.PolicyScope{TenantId: sc.TenantID, WorkspaceId: sc.ScopeID}
+	// PrincipalID travels too: a hook that resolves entitlements per person
+	// cannot do anything with a tenant alone, and dropping it here made every
+	// such hook refuse with "no principal" for reasons invisible at the call
+	// site. Empty stays empty — the hook decides what that means.
+	return &llmv1.PolicyScope{TenantId: sc.TenantID, WorkspaceId: sc.ScopeID, PrincipalId: sc.PrincipalID}
 }
 
 // policyCheckPolicy resolves the effective check policy for a hook.

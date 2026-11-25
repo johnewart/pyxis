@@ -58,6 +58,11 @@ message CheckPolicy {
 message PolicyScope {
   string tenant_id = 1;
   string workspace_id = 2;
+  // The acting principal, when the caller sent one (llmd's scope metadata
+  // key x-llmd-principal). Empty means the request arrived without one: a
+  // hook that resolves entitlements per person should refuse rather than
+  // assume an identity.
+  string principal_id = 3;
 }
 
 message GetCheckPolicyRequest {}

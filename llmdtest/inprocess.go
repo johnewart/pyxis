@@ -15,6 +15,7 @@ import (
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	"github.com/johnewart/pyxis/llmdhost"
 	"github.com/johnewart/pyxis/llmdtools"
+	"github.com/johnewart/pyxis/policyhook"
 	"github.com/johnewart/pyxis/toolregistry"
 	"github.com/johnewart/pyxis/toolseam"
 	"google.golang.org/grpc"
@@ -51,6 +52,20 @@ type InProcessOptions struct {
 	// Set it (and the same value on the executor) to test executor tools;
 	// empty refuses every ToolProviderService registration.
 	ToolProviderSecret string
+
+	// PolicyHooks installs a policy hook on the embedded Host, exactly as
+	// llmdhost.Config.PolicyHooks does in production. A host that polices its
+	// agents could not otherwise test that policy through a real turn: the
+	// decision happens deep inside the tool loop, and asserting on the hook in
+	// isolation proves only that the hook agrees with itself.
+	PolicyHooks policyhook.Hooks
+
+	// ServerOptions are passed to the gRPC server this harness serves llmd on,
+	// so a host can install the interceptors it runs in production — the ones
+	// that authenticate a caller and put what they established in the context
+	// the hook later reads. Without them the harness would serve llmd behind a
+	// bare server no deployment resembles.
+	ServerOptions []grpc.ServerOption
 
 	// ListenAddr, when non-empty, serves gRPC on a real TCP listener at this
 	// address (e.g. "127.0.0.1:0" for an ephemeral port) instead of an
@@ -128,6 +143,7 @@ func StartInProcess(ctx context.Context, opts InProcessOptions) (*Env, error) {
 		KnowledgeSQLitePath: filepath.Join(dataDir, "llmd-knowledge.sqlite"),
 		Tools:               registrars,
 		ToolProviderSecret:  opts.ToolProviderSecret,
+		PolicyHooks:         opts.PolicyHooks,
 		// No idle eviction: a test that pauses between turns must not have its
 		// session runtime swept out from under it.
 		RuntimeIdleEvict: -1,
@@ -136,7 +152,7 @@ func StartInProcess(ctx context.Context, opts InProcessOptions) (*Env, error) {
 		return nil, fmt.Errorf("llmdtest: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(opts.ServerOptions...)
 	host.Register(grpcServer)
 
 	il, err := newInProcessListener(opts.ListenAddr)

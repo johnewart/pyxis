@@ -70,6 +70,8 @@ export type CatalogModelPickerProps = {
   filterNoun?: string;
   /** The trigger's accessible name (default: its label). */
   ariaLabel?: string;
+  /** Put on the trigger button as data-testid, for host tests. */
+  testId?: string;
   /**
    * Builds a provider's tree from its options, for hosts with their own
    * grouping (default: a flat list). Leaves and groups may share a level.
@@ -77,6 +79,11 @@ export type CatalogModelPickerProps = {
   buildTree?: CatalogTreeBuilder;
   /** Keep the tree's own order instead of sorting each column by label. */
   keepOrder?: boolean;
+  /**
+   * Dropdown layout: 'columns' (default) browses providers then models in
+   * columns; 'flat' lists every provider's models at once.
+   */
+  layout?: 'columns' | 'flat';
 };
 
 export function formatCatalogModelPickerLabel(
@@ -121,8 +128,10 @@ export function CatalogModelPicker({
   onReloadProviderModels,
   filterNoun,
   ariaLabel,
+  testId,
   buildTree,
   keepOrder,
+  layout,
 }: CatalogModelPickerProps) {
   const allModelOptions = options;
 
@@ -228,6 +237,7 @@ export function CatalogModelPicker({
         .join(' ')}
       aria-haspopup="menu"
       aria-label={ariaLabel}
+      data-testid={testId}
       aria-invalid={isInvalid || undefined}
       styles={{
         root: {
@@ -305,6 +315,7 @@ export function CatalogModelPicker({
             filterNoun={filterNoun}
             buildTree={buildTree}
             keepOrder={keepOrder}
+            layout={layout}
           />
         </Menu.Dropdown>
       </Menu>

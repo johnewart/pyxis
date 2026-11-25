@@ -12,9 +12,9 @@ import (
 
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	"github.com/johnewart/pyxis/internal/llm/backend"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/serverutil"
 	"github.com/johnewart/pyxis/internal/store"
+	"github.com/johnewart/pyxis/policyhook"
 )
 
 // countingBackend counts calls that reach the provider.

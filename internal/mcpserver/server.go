@@ -14,7 +14,6 @@ import (
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
 	"github.com/johnewart/pyxis/internal/assistant/conversationevents"
 	"github.com/johnewart/pyxis/internal/assistant/session"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/serve"
 	"github.com/johnewart/pyxis/internal/server"
 	"github.com/johnewart/pyxis/internal/serverutil"
@@ -23,11 +22,12 @@ import (
 	"github.com/johnewart/pyxis/internal/toolargs"
 	"github.com/johnewart/pyxis/internal/tooldelegate"
 	"github.com/johnewart/pyxis/internal/toolexec"
-	"github.com/johnewart/pyxis/toolseam"
 	"github.com/johnewart/pyxis/internal/toolmerge"
 	"github.com/johnewart/pyxis/internal/toolprovider"
 	"github.com/johnewart/pyxis/internal/toolsession"
 	"github.com/johnewart/pyxis/llmdlog"
+	"github.com/johnewart/pyxis/policyhook"
+	"github.com/johnewart/pyxis/toolseam"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -257,7 +257,7 @@ func (s *Server) handleToolsList(ctx context.Context, w http.ResponseWriter, r *
 		writeRPCError(w, req.ID, -32002, "agent not loaded", http.StatusNotFound)
 		return
 	}
-	if ma.Scope != sc {
+	if ma.Scope != sessionmanager.NormalizeScope(sc) {
 		writeRPCError(w, req.ID, -32002, "agent not found for user", http.StatusNotFound)
 		return
 	}
@@ -406,7 +406,7 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, r *
 		writeRPCError(w, req.ID, -32002, "agent not loaded", http.StatusNotFound)
 		return
 	}
-	if ma.Scope != sc {
+	if ma.Scope != sessionmanager.NormalizeScope(sc) {
 		writeRPCError(w, req.ID, -32002, "agent not found for user", http.StatusNotFound)
 		return
 	}
@@ -438,15 +438,34 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, r *
 		writeRPCError(w, req.ID, -32602, "invalid arguments", http.StatusBadRequest)
 		return
 	}
+	// Minted BEFORE the policy check, not after, so the decision and the
+	// invocation are about the same identifiable call: a hook that records
+	// its decision per tool call has nothing to key on otherwise.
+	toolCallID := "mcp-" + uuid.New().String()
+
 	if s.cfg.PolicyHooks != nil {
 		polTurnID := ""
 		if s.cfg.LLM != nil && s.cfg.LLM.TurnRegister != nil {
 			polTurnID = s.cfg.LLM.TurnRegister.CurrentTurnID(sc, sessionID)
 		}
 		verdict, herr := s.cfg.PolicyHooks.CheckToolCall(ctx, policyhook.ToolCallRequest{
-			AgentID:       agentID,
-			SessionID:     sessionID,
-			TurnID:        polTurnID,
+			// Same scope the invocation below is stamped with. Without it a
+			// hook sees MCP-dispatched calls with no tenant and no principal,
+			// which is indistinguishable from an unauthenticated caller.
+			Scope: &llmv1.PolicyScope{
+				TenantId:    sc.TenantID,
+				WorkspaceId: sc.ScopeID,
+				PrincipalId: sc.PrincipalID,
+			},
+			AgentID:   agentID,
+			SessionID: sessionID,
+			TurnID:    polTurnID,
+			// The id of the call being decided, the same one the invocation
+			// below carries. A hook that records its decision per tool call
+			// — to honour an obligation when the result comes back, or to
+			// put the decision in a receipt — has nothing to key on without
+			// it, and silently finds no decision for every MCP call.
+			ToolCallID:    toolCallID,
 			ReadOnly:      s.readOnlyForMCP(r),
 			Name:          def.GetName(),
 			ArgumentsJSON: string(argsJSON),
@@ -480,7 +499,6 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, r *
 	if s.cfg.LLM != nil && s.cfg.LLM.TurnRegister != nil {
 		turnSeq = s.cfg.LLM.TurnRegister.Current(sc, sessionID)
 	}
-	toolCallID := "mcp-" + uuid.New().String()
 
 	// Same ToolExecutionStarted/Finished visibility native/OpenAI-style
 	// backends get for free from ChatStream's own send closure (see
@@ -746,7 +764,7 @@ func (s *Server) handleResourcesList(ctx context.Context, w http.ResponseWriter,
 		return
 	}
 	ma, ok := s.cfg.SessionRuntimes.Get(sc, agentID)
-	if !ok || ma.Scope != sc {
+	if !ok || ma.Scope != sessionmanager.NormalizeScope(sc) {
 		writeRPCError(w, req.ID, -32002, "session not found for scope", http.StatusNotFound)
 		return
 	}
@@ -831,7 +849,7 @@ func (s *Server) toolsDisabledForTurn(sc serverutil.Scope, agentID, sessionID st
 
 func (s *Server) buildContextJSON(ctx context.Context, sc serverutil.Scope, agentID, sessionID string) ([]byte, error) {
 	ma, ok := s.cfg.SessionRuntimes.Get(sc, agentID)
-	if !ok || ma.Scope != sc {
+	if !ok || ma.Scope != sessionmanager.NormalizeScope(sc) {
 		return nil, errors.New("agent not available")
 	}
 	tools := toolmerge.RedactSecretsForList(s.effectiveTools(ma))

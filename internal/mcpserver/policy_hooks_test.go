@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/server"
 	"github.com/johnewart/pyxis/internal/serverutil"
 	"github.com/johnewart/pyxis/internal/store"
+	"github.com/johnewart/pyxis/policyhook"
 	"github.com/johnewart/pyxis/toolregistry"
 )
 
@@ -52,10 +52,14 @@ func TestMCPToolsCallPolicyDeny(t *testing.T) {
 	}
 
 	var sawEntry atomic.Int32
+	var sawTenant atomic.Value
+	var sawToolCallID atomic.Value
 	hooks := policyhook.Funcs{CheckToolCallFn: func(_ context.Context, r policyhook.ToolCallRequest) (policyhook.Verdict, error) {
 		if r.EntryPath == llmv1.PolicyEntryPath_POLICY_ENTRY_PATH_MCP_SERVER {
 			sawEntry.Add(1)
 		}
+		sawTenant.Store(r.Scope.GetTenantId())
+		sawToolCallID.Store(r.ToolCallID)
 		return policyhook.Verdict{Decision: policyhook.DecisionDeny, Reason: "mcp call blocked by policy"}, nil
 	}}
 	mcp := New(Config{DB: db, SessionRuntimes: mgr, LLM: llmSrv, PolicyHooks: hooks})
@@ -80,5 +84,18 @@ func TestMCPToolsCallPolicyDeny(t *testing.T) {
 	}
 	if sawEntry.Load() != 1 {
 		t.Fatalf("hook saw mcp_server entry path %d times, want 1", sawEntry.Load())
+	}
+	// The hook must be told WHO the call is for. An unscoped request looks
+	// exactly like an unauthenticated one to a hook that resolves
+	// entitlements per tenant/principal, so it would refuse everything.
+	if got, _ := sawTenant.Load().(string); got != disabledToolsWorkspace {
+		t.Fatalf("hook saw tenant %q, want %q", got, disabledToolsWorkspace)
+	}
+	// The call being decided must be identifiable. A hook that records its
+	// decision per tool call -- to honour a mask obligation when the result
+	// comes back, or to put the decision in a receipt -- has nothing to key
+	// on otherwise, and finds no decision for every call that came this way.
+	if got, _ := sawToolCallID.Load().(string); got == "" {
+		t.Error("hook saw no tool call id on an MCP-dispatched call")
 	}
 }

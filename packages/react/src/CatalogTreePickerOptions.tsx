@@ -52,6 +52,12 @@ export type CatalogTreePickerOptionsProps = {
   browserRef?: RefObject<CatalogColumnBrowserHandle | null>;
   /** Forwarded to CatalogColumnBrowser — see its doc comment. Menu variant only. */
   onReloadProvider?: (providerId: string) => void | Promise<void>;
+  /**
+   * How the menu variant shows an unfiltered catalog: 'columns' (default) is
+   * the Finder-style column browser; 'flat' lists every provider's models at
+   * once, under a label per provider, each row named for the model alone.
+   */
+  layout?: 'columns' | 'flat';
 };
 
 function groupOptionsByProvider(
@@ -114,6 +120,8 @@ type RenderCtx = {
   /** Shared mutable counter tracking the linear index of each rendered leaf. */
   flatIndexRef: { current: number };
   activeIndex?: number | null;
+  /** Prefix each row with the provider's name (off in the flat layout, which labels providers separately). */
+  showProviderPrefix?: boolean;
 };
 
 function buildProviderTreeRoots(
@@ -200,7 +208,9 @@ function renderTreeNodesFlat(
       const label =
         ctx.searchQuery && breadcrumb?.length
           ? formatCatalogTreeBreadcrumb(breadcrumb)
-          : `${ctx.providerName}: ${node.label}`;
+          : ctx.showProviderPrefix === false
+            ? node.label
+            : `${ctx.providerName}: ${node.label}`;
 
       if (ctx.variant === 'combobox') {
         out.push(
@@ -280,7 +290,10 @@ function renderFlatProviderOptions(
     const itemIndex = ctx.flatIndexRef.current++;
     const isActive = ctx.activeIndex != null && itemIndex === ctx.activeIndex;
     const selected = ctx.isOptionSelected?.(opt) ?? false;
-    const label = `${providerName}: ${opt.modelName}`;
+    const label =
+      ctx.showProviderPrefix === false
+        ? opt.modelName
+        : `${providerName}: ${opt.modelName}`;
 
     if (ctx.variant === 'combobox') {
       out.push(
@@ -372,6 +385,7 @@ const CatalogTreePickerOptionsComponent = ({
   activeIndex,
   browserRef,
   onReloadProvider,
+  layout = 'columns',
 }: CatalogTreePickerOptionsProps) => {
   const normalizedSearch = normalizeSearchQuery(searchQuery);
   const providerGroups = useMemo(
@@ -386,7 +400,7 @@ const CatalogTreePickerOptionsComponent = ({
 
   const fallbackProviderId = providerGroups[0]?.providerId ?? '';
 
-  if (variant === 'menu' && normalizedSearch.length === 0) {
+  if (variant === 'menu' && normalizedSearch.length === 0 && layout !== 'flat') {
     return (
       <CatalogColumnBrowser
         ref={browserRef as RefObject<CatalogColumnBrowserHandle> | undefined}
@@ -406,19 +420,37 @@ const CatalogTreePickerOptionsComponent = ({
 
   // Shared mutable counter — must be reset each render so indices are stable.
   const flatIndexRef = { current: 0 };
+  // In the flat layout each provider gets its own label row, so the model rows
+  // themselves are named for the model alone.
+  const showProviderPrefix = !(layout === 'flat' && normalizedSearch.length === 0);
+  const providerLabel = (group: { providerId: string; providerName: string }) =>
+    layout === 'flat' &&
+    normalizedSearch.length === 0 &&
+    variant === 'menu' &&
+    providerGroups.length > 1
+      ? [
+          <Menu.Label key={`label-${group.providerId}`} style={catalogPickerMenuLabelStyle}>
+            {group.providerName}
+          </Menu.Label>,
+        ]
+      : [];
 
   const rendered = providerGroups.flatMap((group): ReactNode[] => {
     const { tree, optionByModelId } = buildProviderTreeRoots(group, buildTree);
 
     if (catalogTreeIsFlat(tree)) {
-      return renderFlatProviderOptions(group.providerName, group.options, {
-        searchQuery: normalizedSearch,
-        isOptionSelected,
-        onSelect,
-        variant,
-        flatIndexRef,
-        activeIndex,
-      });
+      return [
+        ...providerLabel(group),
+        ...renderFlatProviderOptions(group.providerName, group.options, {
+          searchQuery: normalizedSearch,
+          isOptionSelected,
+          onSelect,
+          variant,
+          flatIndexRef,
+          activeIndex,
+          showProviderPrefix,
+        }),
+      ];
     }
 
     const ctx: RenderCtx = {
@@ -432,6 +464,7 @@ const CatalogTreePickerOptionsComponent = ({
       variant,
       flatIndexRef,
       activeIndex,
+      showProviderPrefix,
     };
 
     const nodes = renderTreeNodesFlat(tree.roots, 0, ctx);
@@ -445,7 +478,7 @@ const CatalogTreePickerOptionsComponent = ({
       ];
     }
 
-    return nodes;
+    return [...providerLabel(group), ...nodes];
   });
 
   return <>{rendered}</>;

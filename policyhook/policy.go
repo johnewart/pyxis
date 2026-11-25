@@ -1,6 +1,4 @@
-// Package policyhook defines the policy hook contract: a Hooks interface,
-// a no-op default, an in-process Funcs adapter, a gRPC client adapter, and a
-// Guard that applies the fail mode and records metrics.
+// (Package documentation lives in hooks.go.)
 package policyhook
 
 import (

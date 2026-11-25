@@ -44,7 +44,7 @@ class PolicyHookServiceServicer:
     """
 
     def GetCheckPolicy(self, request, context):
-        """Returns the CheckPolicy used for this hook's inputs.
+        """Returns the CheckPolicy used for each hook's inputs.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

@@ -43,6 +43,7 @@ export function CatalogModelPickerMenuContent({
   filterNoun = 'models',
   buildTree,
   keepOrder,
+  layout,
 }: CatalogModelPickerMenuContentProps) {
   const [filter, setFilter] = useState('');
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
@@ -171,6 +172,7 @@ export function CatalogModelPickerMenuContent({
           options={options}
           buildTree={buildTree}
           keepOrder={keepOrder}
+          layout={layout}
           variant="menu"
           searchQuery={filter}
           isOptionSelected={isOptionSelected}

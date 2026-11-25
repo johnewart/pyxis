@@ -28,16 +28,16 @@ import (
 	"github.com/johnewart/pyxis/internal/toolargs"
 	"github.com/johnewart/pyxis/internal/tooldelegate"
 	"github.com/johnewart/pyxis/internal/toolexec"
-	"github.com/johnewart/pyxis/toolseam"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/toolmerge"
-	"github.com/johnewart/pyxis/internal/tooltimeout"
 	"github.com/johnewart/pyxis/internal/toolprovider"
 	"github.com/johnewart/pyxis/internal/toolresult"
 	"github.com/johnewart/pyxis/internal/toolsession"
+	"github.com/johnewart/pyxis/internal/tooltimeout"
 	"github.com/johnewart/pyxis/llmdlog"
+	"github.com/johnewart/pyxis/policyhook"
 	"github.com/johnewart/pyxis/systemprompt"
 	"github.com/johnewart/pyxis/toolregistry"
+	"github.com/johnewart/pyxis/toolseam"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -326,7 +326,9 @@ func (s *LlmServer) ensureKnownSession(ctx context.Context, sessionID string) er
 	if !ok {
 		return status.Errorf(codes.NotFound, "unknown session_id %q", sid)
 	}
-	if ma.Scope != sc {
+	// Normalized: a runtime's scope never carries a principal, so a request
+	// that does would otherwise never match the session it just created.
+	if ma.Scope != sessionmanager.NormalizeScope(sc) {
 		return status.Errorf(codes.NotFound, "unknown session_id %q", sid)
 	}
 	return nil
@@ -817,10 +819,10 @@ type preparedComplete struct {
 	sc         serverutil.Scope
 	providerID string
 	backend    backend.Backend
-	provider llmv1.LlmProviderType
-	opt      *llmv1.CallOptions
-	messages []*llmv1.Message
-	tools    []*llmv1.ToolDefinition
+	provider   llmv1.LlmProviderType
+	opt        *llmv1.CallOptions
+	messages   []*llmv1.Message
+	tools      []*llmv1.ToolDefinition
 }
 
 // prepareComplete validates a CompleteRequest and resolves its backend, model

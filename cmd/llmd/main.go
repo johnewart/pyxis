@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/johnewart/pyxis/cmd/llmd/debugserver"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/internal/tracing"
 	"github.com/johnewart/pyxis/llmdhost"
 	"github.com/johnewart/pyxis/llmdlog"
+	"github.com/johnewart/pyxis/policyhook"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -151,7 +151,7 @@ func configFromEnv() (llmdhost.Config, error) {
 		PolicyEndpoint: strings.TrimSpace(os.Getenv("LLMD_POLICY_ENDPOINT")),
 		PolicyTimeout:  time.Duration(envPositiveInt("LLMD_POLICY_TIMEOUT_MS")) * time.Millisecond,
 		PolicyInsecure: envTruthy("LLMD_POLICY_INSECURE"),
-		DatabaseDSN: strings.TrimSpace(os.Getenv("LLMD_DATABASE_URL")),
+		DatabaseDSN:    strings.TrimSpace(os.Getenv("LLMD_DATABASE_URL")),
 		// LLMD_KNOWLEDGE_DIR is the lexical knowledge index directory;
 		// LLMD_KNOWLEDGE_SQLITE_PATH names the retired SQLite file, which is
 		// deleted on start and seeds the directory's default.

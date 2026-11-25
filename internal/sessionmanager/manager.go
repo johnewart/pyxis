@@ -38,10 +38,23 @@ type runtimeKey struct {
 	sessionID string
 }
 
-// normScope trims the scope's fields so map keys are stable.
+// normScope trims the scope's fields so map keys are stable, and DROPS the
+// principal: a session belongs to a tenant and scope, not to the person whose
+// request happened to load it, so two people in one scope must reach one
+// runtime.
 func normScope(sc serverutil.Scope) serverutil.Scope {
 	return serverutil.Scope{TenantID: strings.TrimSpace(sc.TenantID), ScopeID: strings.TrimSpace(sc.ScopeID)}
 }
+
+// NormalizeScope is normScope for callers outside this package.
+//
+// Anyone comparing a runtime's Scope against a request's must normalize first.
+// A runtime's scope has been through normScope and therefore carries no
+// principal; a request's scope does when the caller sent one. Comparing them
+// raw made every session call from a principal-carrying deployment fail as
+// "unknown session_id" — the session was right there, under a scope that
+// differed only in a field runtimes deliberately ignore.
+func NormalizeScope(sc serverutil.Scope) serverutil.Scope { return normScope(sc) }
 
 // ErrMissingStore is returned by New when persistence repos or NewSessionHistory is nil.
 var ErrMissingStore = errors.New("sessionmanager: SessionPersist and NewSessionHistory are required")

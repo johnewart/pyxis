@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	llmv1 "github.com/johnewart/pyxis/gen/llmv1"
-	"github.com/johnewart/pyxis/internal/policyhook"
+	"github.com/johnewart/pyxis/policyhook"
 )
 
 // An erroring hook is allowed when the host's Guard is FailOpen, and denied

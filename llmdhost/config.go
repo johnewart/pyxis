@@ -35,8 +35,8 @@ import (
 	"github.com/johnewart/pyxis/cursorws"
 	"github.com/johnewart/pyxis/internal/tracing"
 	"github.com/johnewart/pyxis/lexstore"
-	"github.com/johnewart/pyxis/internal/policyhook"
 	"github.com/johnewart/pyxis/llmdtools"
+	"github.com/johnewart/pyxis/policyhook"
 	"google.golang.org/grpc"
 )
 
@@ -214,8 +214,12 @@ type Config struct {
 	// grpc.Creds for TLS/mTLS. Optional; embedders can leave it nil.
 	ServerOptions []grpc.ServerOption
 
-	// PolicyHooks is an in-process policy hook (e.g. policyhook.Funcs). Nil
-	// with an empty PolicyEndpoint means no hook: everything is allowed.
+	// PolicyHooks is an in-process policy hook: any implementation of
+	// policyhook.Hooks (github.com/johnewart/pyxis/policyhook — a PUBLIC
+	// package, so a host wraps its own decision engine directly instead of
+	// standing up a remote PolicyHookService to answer questions asked inside
+	// its own binary). policyhook.Funcs adapts plain functions. Nil with an
+	// empty PolicyEndpoint means no hook: everything is allowed.
 	PolicyHooks PolicyHooks
 
 	// PolicyEndpoint is the address of a remote PolicyHookService. Used only

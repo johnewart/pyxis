@@ -25,46 +25,44 @@ _sym_db = _symbol_database.Default()
 from llmv1 import llm_pb2 as llmv1_dot_llm__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12llmv1/policy.proto\x12\x06llm.v1\x1a\x0fllmv1/llm.proto\"\x8f\x02\n\x0b\x43heckPolicy\x12.\n\x07\x63ontent\x18\x01 \x01(\x0e\x32\x14.llm.v1.ContentScopeR\x07\x63ontent\x12\x19\n\x08latest_n\x18\x02 \x01(\rR\x07latestN\x12)\n\x07\x63\x61\x64\x65nce\x18\x03 \x01(\x0e\x32\x0f.llm.v1.CadenceR\x07\x63\x61\x64\x65nce\x12$\n\x0e\x65very_n_rounds\x18\x04 \x01(\rR\x0c\x65veryNRounds\x12\x32\n\x15include_system_prompt\x18\x05 \x01(\x08R\x13includeSystemPrompt\x12\x30\n\x14include_tool_results\x18\x06 \x01(\x08R\x12includeToolResults\"M\n\x0bPolicyScope\x12\x1b\n\ttenant_id\x18\x01 \x01(\tR\x08tenantId\x12!\n\x0cworkspace_id\x18\x02 \x01(\tR\x0bworkspaceId\"\xd1\x02\n\x11PolicyCallContext\x12)\n\x05scope\x18\x01 \x01(\x0b\x32\x13.llm.v1.PolicyScopeR\x05scope\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId\x12\x17\n\x07turn_id\x18\x04 \x01(\tR\x06turnId\x12\x14\n\x05round\x18\x05 \x01(\rR\x05round\x12\x1f\n\x0bprovider_id\x18\x06 \x01(\tR\nproviderId\x12#\n\rprovider_type\x18\x07 \x01(\tR\x0cproviderType\x12\x14\n\x05model\x18\x08 \x01(\tR\x05model\x12/\n\x07purpose\x18\t \x01(\x0e\x32\x15.llm.v1.PolicyPurposeR\x07purpose\x12\x1b\n\tread_only\x18\n \x01(\x08R\x08readOnly\"\x17\n\x15GetCheckPolicyRequest\"\xc8\x01\n\x16GetCheckPolicyResponse\x12\x39\n\x0e\x63heck_llm_call\x18\x01 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\x0c\x63heckLlmCall\x12\x36\n\x0c\x66ilter_tools\x18\x02 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\x0b\x66ilterTools\x12;\n\x0f\x63heck_tool_call\x18\x03 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\rcheckToolCall\"w\n\x13\x43heckLLMCallRequest\x12\x33\n\x07\x63ontext\x18\x01 \x01(\x0b\x32\x19.llm.v1.PolicyCallContextR\x07\x63ontext\x12+\n\x08messages\x18\x02 \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\"\xdc\x01\n\x14\x43heckLLMCallResponse\x12\x32\n\x08\x64\x65\x63ision\x18\x01 \x01(\x0e\x32\x16.llm.v1.PolicyDecisionR\x08\x64\x65\x63ision\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n\x0cuser_message\x18\x03 \x01(\tR\x0buserMessage\x12\x41\n\x0fpolicy_override\x18\x04 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override\"\xa4\x01\n\x12\x46ilterToolsRequest\x12\x33\n\x07\x63ontext\x18\x01 \x01(\x0b\x32\x19.llm.v1.PolicyCallContextR\x07\x63ontext\x12+\n\x08messages\x18\x02 \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\x12,\n\x05tools\x18\x03 \x03(\x0b\x32\x16.llm.v1.ToolDefinitionR\x05tools\"\xb2\x01\n\x13\x46ilterToolsResponse\x12,\n\x12\x61llowed_tool_names\x18\x01 \x03(\tR\x10\x61llowedToolNames\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\x12\x41\n\x0fpolicy_override\x18\x03 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override\"\x9a\x03\n\x14\x43heckToolCallRequest\x12\x33\n\x07\x63ontext\x18\x01 \x01(\x0b\x32\x19.llm.v1.PolicyCallContextR\x07\x63ontext\x12 \n\x0ctool_call_id\x18\x02 \x01(\tR\ntoolCallId\x12\x12\n\x04name\x18\x03 \x01(\tR\x04name\x12%\n\x0e\x61rguments_json\x18\x04 \x01(\tR\rargumentsJson\x12*\n\x04tool\x18\x05 \x01(\x0b\x32\x16.llm.v1.ToolDefinitionR\x04tool\x12\x1a\n\x08mutation\x18\x06 \x01(\x08R\x08mutation\x12\x1c\n\tdelegated\x18\x07 \x01(\x08R\tdelegated\x12%\n\x0e\x61ssistant_text\x18\x08 \x01(\tR\rassistantText\x12\x36\n\nentry_path\x18\t \x01(\x0e\x32\x17.llm.v1.PolicyEntryPathR\tentryPath\x12+\n\x08messages\x18\n \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\"\x95\x02\n\x15\x43heckToolCallResponse\x12\x32\n\x08\x64\x65\x63ision\x18\x01 \x01(\x0e\x32\x16.llm.v1.PolicyDecisionR\x08\x64\x65\x63ision\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n\x0cuser_message\x18\x03 \x01(\tR\x0buserMessage\x12\x36\n\x17replacement_tool_result\x18\x04 \x01(\tR\x15replacementToolResult\x12\x41\n\x0fpolicy_override\x18\x05 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override*\\\n\x0c\x43ontentScope\x12\x16\n\x12\x43ONTENT_SCOPE_FULL\x10\x00\x12\x18\n\x14\x43ONTENT_SCOPE_LATEST\x10\x01\x12\x1a\n\x16\x43ONTENT_SCOPE_LATEST_N\x10\x02*W\n\x07\x43\x61\x64\x65nce\x12\x17\n\x13\x43\x41\x44\x45NCE_EVERY_ROUND\x10\x00\x12\x17\n\x13\x43\x41\x44\x45NCE_FIRST_ROUND\x10\x01\x12\x1a\n\x16\x43\x41\x44\x45NCE_EVERY_N_ROUNDS\x10\x02*E\n\x0ePolicyDecision\x12\x19\n\x15POLICY_DECISION_ALLOW\x10\x00\x12\x18\n\x14POLICY_DECISION_DENY\x10\x01*l\n\rPolicyPurpose\x12\x1e\n\x1aPOLICY_PURPOSE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aPOLICY_PURPOSE_CHAT_STREAM\x10\x01\x12\x1b\n\x17POLICY_PURPOSE_COMPLETE\x10\x02*x\n\x0fPolicyEntryPath\x12!\n\x1dPOLICY_ENTRY_PATH_UNSPECIFIED\x10\x00\x12 \n\x1cPOLICY_ENTRY_PATH_AGENT_LOOP\x10\x01\x12 \n\x1cPOLICY_ENTRY_PATH_MCP_SERVER\x10\x02\x32\xc5\x02\n\x11PolicyHookService\x12O\n\x0eGetCheckPolicy\x12\x1d.llm.v1.GetCheckPolicyRequest\x1a\x1e.llm.v1.GetCheckPolicyResponse\x12I\n\x0c\x43heckLLMCall\x12\x1b.llm.v1.CheckLLMCallRequest\x1a\x1c.llm.v1.CheckLLMCallResponse\x12\x46\n\x0b\x46ilterTools\x12\x1a.llm.v1.FilterToolsRequest\x1a\x1b.llm.v1.FilterToolsResponse\x12L\n\rCheckToolCall\x12\x1c.llm.v1.CheckToolCallRequest\x1a\x1d.llm.v1.CheckToolCallResponseB,Z*github.com/johnewart/pyxis/gen/llmv1;llmv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12llmv1/policy.proto\x12\x06llm.v1\x1a\x0fllmv1/llm.proto\"\x8f\x02\n\x0b\x43heckPolicy\x12.\n\x07\x63ontent\x18\x01 \x01(\x0e\x32\x14.llm.v1.ContentScopeR\x07\x63ontent\x12\x19\n\x08latest_n\x18\x02 \x01(\rR\x07latestN\x12)\n\x07\x63\x61\x64\x65nce\x18\x03 \x01(\x0e\x32\x0f.llm.v1.CadenceR\x07\x63\x61\x64\x65nce\x12$\n\x0e\x65very_n_rounds\x18\x04 \x01(\rR\x0c\x65veryNRounds\x12\x32\n\x15include_system_prompt\x18\x05 \x01(\x08R\x13includeSystemPrompt\x12\x30\n\x14include_tool_results\x18\x06 \x01(\x08R\x12includeToolResults\"p\n\x0bPolicyScope\x12\x1b\n\ttenant_id\x18\x01 \x01(\tR\x08tenantId\x12!\n\x0cworkspace_id\x18\x02 \x01(\tR\x0bworkspaceId\x12!\n\x0cprincipal_id\x18\x03 \x01(\tR\x0bprincipalId\"\x17\n\x15GetCheckPolicyRequest\"\xb2\x01\n\x16GetCheckPolicyResponse\x12.\n\x08llm_call\x18\x01 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\x07llmCall\x12\x36\n\x0c\x66ilter_tools\x18\x02 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\x0b\x66ilterTools\x12\x30\n\ttool_call\x18\x03 \x01(\x0b\x32\x13.llm.v1.CheckPolicyR\x08toolCall\"\x80\x03\n\x13\x43heckLLMCallRequest\x12)\n\x05scope\x18\x01 \x01(\x0b\x32\x13.llm.v1.PolicyScopeR\x05scope\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId\x12\x17\n\x07turn_id\x18\x04 \x01(\tR\x06turnId\x12\x14\n\x05round\x18\x05 \x01(\rR\x05round\x12\x1f\n\x0bprovider_id\x18\x06 \x01(\tR\nproviderId\x12#\n\rprovider_type\x18\x07 \x01(\tR\x0cproviderType\x12\x14\n\x05model\x18\x08 \x01(\tR\x05model\x12/\n\x07purpose\x18\t \x01(\x0e\x32\x15.llm.v1.PolicyPurposeR\x07purpose\x12\x1b\n\tread_only\x18\n \x01(\x08R\x08readOnly\x12+\n\x08messages\x18\x0b \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\"\xd6\x01\n\x14\x43heckLLMCallResponse\x12,\n\x08\x64\x65\x63ision\x18\x01 \x01(\x0e\x32\x10.llm.v1.DecisionR\x08\x64\x65\x63ision\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n\x0cuser_message\x18\x03 \x01(\tR\x0buserMessage\x12\x41\n\x0fpolicy_override\x18\x04 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override\"\xad\x03\n\x12\x46ilterToolsRequest\x12)\n\x05scope\x18\x01 \x01(\x0b\x32\x13.llm.v1.PolicyScopeR\x05scope\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId\x12\x17\n\x07turn_id\x18\x04 \x01(\tR\x06turnId\x12\x14\n\x05round\x18\x05 \x01(\rR\x05round\x12\x1f\n\x0bprovider_id\x18\x06 \x01(\tR\nproviderId\x12#\n\rprovider_type\x18\x07 \x01(\tR\x0cproviderType\x12\x14\n\x05model\x18\x08 \x01(\tR\x05model\x12/\n\x07purpose\x18\t \x01(\x0e\x32\x15.llm.v1.PolicyPurposeR\x07purpose\x12\x1b\n\tread_only\x18\n \x01(\x08R\x08readOnly\x12+\n\x08messages\x18\x0b \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\x12,\n\x05tools\x18\x0c \x03(\x0b\x32\x16.llm.v1.ToolDefinitionR\x05tools\"\xe0\x01\n\x13\x46ilterToolsResponse\x12,\n\x08\x64\x65\x63ision\x18\x01 \x01(\x0e\x32\x10.llm.v1.DecisionR\x08\x64\x65\x63ision\x12,\n\x12\x61llowed_tool_names\x18\x02 \x03(\tR\x10\x61llowedToolNames\x12\x16\n\x06reason\x18\x03 \x01(\tR\x06reason\x12\x41\n\x0fpolicy_override\x18\x04 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override\"\xa3\x05\n\x14\x43heckToolCallRequest\x12)\n\x05scope\x18\x01 \x01(\x0b\x32\x13.llm.v1.PolicyScopeR\x05scope\x12\x19\n\x08\x61gent_id\x18\x02 \x01(\tR\x07\x61gentId\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId\x12\x17\n\x07turn_id\x18\x04 \x01(\tR\x06turnId\x12\x14\n\x05round\x18\x05 \x01(\rR\x05round\x12\x1f\n\x0bprovider_id\x18\x06 \x01(\tR\nproviderId\x12#\n\rprovider_type\x18\x07 \x01(\tR\x0cproviderType\x12\x14\n\x05model\x18\x08 \x01(\tR\x05model\x12/\n\x07purpose\x18\t \x01(\x0e\x32\x15.llm.v1.PolicyPurposeR\x07purpose\x12\x1b\n\tread_only\x18\n \x01(\x08R\x08readOnly\x12 \n\x0ctool_call_id\x18\x0b \x01(\tR\ntoolCallId\x12\x12\n\x04name\x18\x0c \x01(\tR\x04name\x12%\n\x0e\x61rguments_json\x18\r \x01(\tR\rargumentsJson\x12*\n\x04tool\x18\x0e \x01(\x0b\x32\x16.llm.v1.ToolDefinitionR\x04tool\x12\x1a\n\x08mutation\x18\x0f \x01(\x08R\x08mutation\x12\x1c\n\tdelegated\x18\x10 \x01(\x08R\tdelegated\x12%\n\x0e\x61ssistant_text\x18\x11 \x01(\tR\rassistantText\x12\x36\n\nentry_path\x18\x12 \x01(\x0e\x32\x17.llm.v1.PolicyEntryPathR\tentryPath\x12+\n\x08messages\x18\x13 \x03(\x0b\x32\x0f.llm.v1.MessageR\x08messages\"\x8f\x02\n\x15\x43heckToolCallResponse\x12,\n\x08\x64\x65\x63ision\x18\x01 \x01(\x0e\x32\x10.llm.v1.DecisionR\x08\x64\x65\x63ision\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\x12!\n\x0cuser_message\x18\x03 \x01(\tR\x0buserMessage\x12\x36\n\x17replacement_tool_result\x18\x04 \x01(\tR\x15replacementToolResult\x12\x41\n\x0fpolicy_override\x18\x05 \x01(\x0b\x32\x13.llm.v1.CheckPolicyH\x00R\x0epolicyOverride\x88\x01\x01\x42\x12\n\x10_policy_override*\\\n\x0c\x43ontentScope\x12\x16\n\x12\x43ONTENT_SCOPE_FULL\x10\x00\x12\x18\n\x14\x43ONTENT_SCOPE_LATEST\x10\x01\x12\x1a\n\x16\x43ONTENT_SCOPE_LATEST_N\x10\x02*W\n\x07\x43\x61\x64\x65nce\x12\x17\n\x13\x43\x41\x44\x45NCE_EVERY_ROUND\x10\x00\x12\x17\n\x13\x43\x41\x44\x45NCE_FIRST_ROUND\x10\x01\x12\x1a\n\x16\x43\x41\x44\x45NCE_EVERY_N_ROUNDS\x10\x02*1\n\x08\x44\x65\x63ision\x12\x12\n\x0e\x44\x45\x43ISION_ALLOW\x10\x00\x12\x11\n\rDECISION_DENY\x10\x01*l\n\rPolicyPurpose\x12\x1e\n\x1aPOLICY_PURPOSE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aPOLICY_PURPOSE_CHAT_STREAM\x10\x01\x12\x1b\n\x17POLICY_PURPOSE_COMPLETE\x10\x02*x\n\x0fPolicyEntryPath\x12!\n\x1dPOLICY_ENTRY_PATH_UNSPECIFIED\x10\x00\x12 \n\x1cPOLICY_ENTRY_PATH_AGENT_LOOP\x10\x01\x12 \n\x1cPOLICY_ENTRY_PATH_MCP_SERVER\x10\x02\x32\xc5\x02\n\x11PolicyHookService\x12O\n\x0eGetCheckPolicy\x12\x1d.llm.v1.GetCheckPolicyRequest\x1a\x1e.llm.v1.GetCheckPolicyResponse\x12I\n\x0c\x43heckLLMCall\x12\x1b.llm.v1.CheckLLMCallRequest\x1a\x1c.llm.v1.CheckLLMCallResponse\x12\x46\n\x0b\x46ilterTools\x12\x1a.llm.v1.FilterToolsRequest\x1a\x1b.llm.v1.FilterToolsResponse\x12L\n\rCheckToolCall\x12\x1c.llm.v1.CheckToolCallRequest\x1a\x1d.llm.v1.CheckToolCallResponseB.Z,github.com/johnewart/pyxis/gen/llmv1;llmv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'llmv1.policy_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z*github.com/johnewart/pyxis/gen/llmv1;llmv1'
-  _globals['_CONTENTSCOPE']._serialized_start=2353
-  _globals['_CONTENTSCOPE']._serialized_end=2445
-  _globals['_CADENCE']._serialized_start=2447
-  _globals['_CADENCE']._serialized_end=2534
-  _globals['_POLICYDECISION']._serialized_start=2536
-  _globals['_POLICYDECISION']._serialized_end=2605
-  _globals['_POLICYPURPOSE']._serialized_start=2607
-  _globals['_POLICYPURPOSE']._serialized_end=2715
-  _globals['_POLICYENTRYPATH']._serialized_start=2717
-  _globals['_POLICYENTRYPATH']._serialized_end=2837
+  _globals['DESCRIPTOR']._serialized_options = b'Z,github.com/johnewart/pyxis/gen/llmv1;llmv1'
+  _globals['_CONTENTSCOPE']._serialized_start=2856
+  _globals['_CONTENTSCOPE']._serialized_end=2948
+  _globals['_CADENCE']._serialized_start=2950
+  _globals['_CADENCE']._serialized_end=3037
+  _globals['_DECISION']._serialized_start=3039
+  _globals['_DECISION']._serialized_end=3088
+  _globals['_POLICYPURPOSE']._serialized_start=3090
+  _globals['_POLICYPURPOSE']._serialized_end=3198
+  _globals['_POLICYENTRYPATH']._serialized_start=3200
+  _globals['_POLICYENTRYPATH']._serialized_end=3320
   _globals['_CHECKPOLICY']._serialized_start=48
   _globals['_CHECKPOLICY']._serialized_end=319
   _globals['_POLICYSCOPE']._serialized_start=321
-  _globals['_POLICYSCOPE']._serialized_end=398
-  _globals['_POLICYCALLCONTEXT']._serialized_start=401
-  _globals['_POLICYCALLCONTEXT']._serialized_end=738
-  _globals['_GETCHECKPOLICYREQUEST']._serialized_start=740
-  _globals['_GETCHECKPOLICYREQUEST']._serialized_end=763
-  _globals['_GETCHECKPOLICYRESPONSE']._serialized_start=766
-  _globals['_GETCHECKPOLICYRESPONSE']._serialized_end=966
-  _globals['_CHECKLLMCALLREQUEST']._serialized_start=968
-  _globals['_CHECKLLMCALLREQUEST']._serialized_end=1087
-  _globals['_CHECKLLMCALLRESPONSE']._serialized_start=1090
-  _globals['_CHECKLLMCALLRESPONSE']._serialized_end=1310
-  _globals['_FILTERTOOLSREQUEST']._serialized_start=1313
-  _globals['_FILTERTOOLSREQUEST']._serialized_end=1477
-  _globals['_FILTERTOOLSRESPONSE']._serialized_start=1480
-  _globals['_FILTERTOOLSRESPONSE']._serialized_end=1658
-  _globals['_CHECKTOOLCALLREQUEST']._serialized_start=1661
-  _globals['_CHECKTOOLCALLREQUEST']._serialized_end=2071
-  _globals['_CHECKTOOLCALLRESPONSE']._serialized_start=2074
-  _globals['_CHECKTOOLCALLRESPONSE']._serialized_end=2351
-  _globals['_POLICYHOOKSERVICE']._serialized_start=2840
-  _globals['_POLICYHOOKSERVICE']._serialized_end=3165
+  _globals['_POLICYSCOPE']._serialized_end=433
+  _globals['_GETCHECKPOLICYREQUEST']._serialized_start=435
+  _globals['_GETCHECKPOLICYREQUEST']._serialized_end=458
+  _globals['_GETCHECKPOLICYRESPONSE']._serialized_start=461
+  _globals['_GETCHECKPOLICYRESPONSE']._serialized_end=639
+  _globals['_CHECKLLMCALLREQUEST']._serialized_start=642
+  _globals['_CHECKLLMCALLREQUEST']._serialized_end=1026
+  _globals['_CHECKLLMCALLRESPONSE']._serialized_start=1029
+  _globals['_CHECKLLMCALLRESPONSE']._serialized_end=1243
+  _globals['_FILTERTOOLSREQUEST']._serialized_start=1246
+  _globals['_FILTERTOOLSREQUEST']._serialized_end=1675
+  _globals['_FILTERTOOLSRESPONSE']._serialized_start=1678
+  _globals['_FILTERTOOLSRESPONSE']._serialized_end=1902
+  _globals['_CHECKTOOLCALLREQUEST']._serialized_start=1905
+  _globals['_CHECKTOOLCALLREQUEST']._serialized_end=2580
+  _globals['_CHECKTOOLCALLRESPONSE']._serialized_start=2583
+  _globals['_CHECKTOOLCALLRESPONSE']._serialized_end=2854
+  _globals['_POLICYHOOKSERVICE']._serialized_start=3323
+  _globals['_POLICYHOOKSERVICE']._serialized_end=3648
 # @@protoc_insertion_point(module_scope)

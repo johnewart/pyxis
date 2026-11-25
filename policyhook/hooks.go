@@ -1,3 +1,20 @@
+// Package policyhook is llmd's policy contract: the three questions llmd asks
+// before it acts — may this LLM call happen, which tools may this round see,
+// may this tool call run — and the answers it accepts back.
+//
+// It is PUBLIC on purpose. A host embedding llmd (see llmdhost) enforces its
+// own policy by implementing Hooks in its own process and passing it as
+// Config.PolicyHooks. While this package lived under internal/ that was
+// impossible: an embedder could name llmdhost.PolicyHooks but could not write
+// a method taking an internal request type, so the only route left was serving
+// PolicyHookService over gRPC from a second process — a remote call, a TLS
+// decision and a failure mode, all to answer a question being asked inside the
+// same binary. Hosting llmd and policing it are the same job and belong on the
+// same side of the import boundary.
+//
+// Two implementations ship here: Funcs for an in-process hook, and the client
+// built by NewGRPCClient for a remote PolicyHookService. Guard wraps either
+// one with the fail mode, metrics and tracing.
 package policyhook
 
 import (
