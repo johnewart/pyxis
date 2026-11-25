@@ -26,9 +26,38 @@ import {
   agentProfileFromProto,
   createLlmdAgentProfile,
   createLlmdSessionFromAgentProfile,
+  listLlmdTools,
   setLlmdAgentProfileOverlay,
   updateLlmdAgentProfile,
 } from '../src/agentProfiles.js';
+
+describe('listLlmdTools', () => {
+  // Regression: profile editors listed tools via listSessionTools, which needs
+  // a session; a settings page has none, so the tool list was always empty.
+  it('lists tenant tools through ListTools with the scope headers, sorted', async () => {
+    let tenant: string | null = null;
+    const transport = createRouterTransport(({ service }) => {
+      service(LlmService, {
+        listTools(_req, ctx) {
+          tenant = ctx.requestHeader.get('llmd-tenant-id');
+          return {
+            tools: [
+              { name: 'web_search', description: 'Search the web' },
+              { name: ' ', description: 'blank names are dropped' },
+              { name: 'read_code', description: '' },
+            ],
+          };
+        },
+      });
+    });
+    const tools = await listLlmdTools({ transport, tenantId: 'local', scopeId: 'default' });
+    expect(tenant).toBe('local');
+    expect(tools).toEqual([
+      { name: 'read_code', description: '' },
+      { name: 'web_search', description: 'Search the web' },
+    ]);
+  });
+});
 
 describe('setLlmdAgentProfileOverlay', () => {
   it('sends only the optionals that are set, and an explicit false', async () => {

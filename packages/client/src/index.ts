@@ -187,6 +187,8 @@ export {
 
 export {
   agentProfileFromProto,
+  listLlmdTools,
+  type LlmdToolInfo,
   listLlmdAgentProfiles,
   getLlmdAgentProfile,
   createLlmdAgentProfile,

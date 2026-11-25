@@ -115,6 +115,34 @@ function toolMappingToProto(
   }));
 }
 
+/** A tool that exists for the caller's tenant, as a profile's tool mapping can name it. */
+export type LlmdToolInfo = {
+  name: string;
+  description: string;
+};
+
+/**
+ * List every tool that exists for the caller's tenant (llm.v1 ListTools):
+ * the host's registered tools plus the tenant's tool-provider (executor)
+ * tools. Session-independent, and the same set llmd validates profile tool
+ * mappings against, so it is what a profile editor should offer.
+ */
+export async function listLlmdTools(opts: BaseOpts): Promise<LlmdToolInfo[]> {
+  const client = resolveLlmServiceClient(opts);
+  const res = await callUnary(
+    (o) => client.listTools({}, o),
+    scopeHeaders(opts),
+    undefined,
+    { label: "listTools" }
+  );
+  const out: LlmdToolInfo[] = [];
+  for (const t of res.tools ?? []) {
+    const name = t.name?.trim();
+    if (name) out.push({ name, description: t.description ?? "" });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 /** List every agent profile visible to the workspace (static tier included). */
 export async function listLlmdAgentProfiles(
   opts: BaseOpts
