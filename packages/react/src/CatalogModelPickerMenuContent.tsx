@@ -74,7 +74,7 @@ export function CatalogModelPickerMenuContent({
 
   // Flat option list for the current filter — mirrors CatalogTreePickerOptions render order
   const flatOptions = filter.trim()
-    ? getFilteredFlatOptions(options, filter, buildTree)
+    ? getFilteredFlatOptions(options, filter, buildTree, keepOrder)
     : [];
 
   // Scroll the active item into view when activeIndex changes

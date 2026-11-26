@@ -18,10 +18,11 @@
 // leaves its old .js in dist/ until the next `just dist`, which also removes
 // output the sources no longer produce.
 //
-// Requires each package's node_modules (run `just dist` once on a fresh clone).
+// Requires the workspace's node_modules (run `just dist` once on a fresh clone).
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, watch } from 'node:fs';
+import { watch } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,9 +33,14 @@ const PACKAGES = ['client', 'core', 'react'];
 // Must match SOURCES in vendor-shared-types.mjs.
 const VENDORED = new Set(['messages.ts', 'sessionQueue.ts', 'conversationEvents.ts']);
 
+// Each package's tsc, found the way Node finds it from that package (the pnpm
+// workspace hoists it to the pyxis root).
+const tscOf = {};
 for (const name of PACKAGES) {
-  if (!existsSync(path.join(pkg(name), 'node_modules', 'typescript'))) {
-    console.error(`[dev-watch] packages/${name} has no node_modules; run \`just dist\` once first.`);
+  try {
+    tscOf[name] = createRequire(path.join(pkg(name), 'package.json')).resolve('typescript/bin/tsc');
+  } catch {
+    console.error(`[dev-watch] no typescript for packages/${name}; run \`just dist\` once first.`);
     process.exit(1);
   }
 }
@@ -68,7 +74,7 @@ vendor();
 
 const children = [];
 for (const name of PACKAGES) {
-  const tsc = path.join(pkg(name), 'node_modules', 'typescript', 'bin', 'tsc');
+  const tsc = tscOf[name];
   const child = spawn(
     process.execPath,
     [tsc, '-p', 'tsconfig.json', '--watch', '--preserveWatchOutput'],

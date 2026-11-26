@@ -1,17 +1,18 @@
 # Developer recipes for llmd: build, test, npm package versioning.
-# Requires: Node/npm, Go + protoc, `just` (https://just.systems).
+# Requires: Node + pnpm (corepack enable), Go + protoc, `just` (https://just.systems).
 
 repo := justfile_directory()
 
 default:
 	@just --list
 
-# Builds packages/{client,core,react}/dist so consumers can depend on them via
-# `file:` links. Dependency order: client -> core -> react.
+# Builds packages/{client,core,react}/dist so consumers can link them. One
+# install of the pnpm workspace, then dependency order: client -> core -> react.
 dist:
-	cd packages/client && npm install && npm run build
-	cd packages/core && npm install && npm run build
-	cd packages/react && npm install && npm run build
+	pnpm install
+	pnpm --filter @pyxis-llm/client run build
+	pnpm --filter @pyxis-llm/core run build
+	pnpm --filter @pyxis-llm/react run build
 
 # Keeps packages/{client,core,react}/dist current while editing (tsc --watch +
 # proto/vendor regeneration), so `file:`-linked consumers pick up changes

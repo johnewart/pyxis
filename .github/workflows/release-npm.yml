@@ -9,7 +9,12 @@ name: Publish to npm
 # version, leading "v" stripped), or a manual run with a version input (or on
 # a tag). Creating a GitHub Release also pushes its tag, so that publishes too,
 # exactly once. scripts/set-npm-versions.mjs keeps every @pyxis-llm/* version
-# in lockstep and points the file: links between them at that version.
+# in lockstep and points the workspace:* links between them at that version
+# (pnpm publish would rewrite them too; doing it first keeps the check below
+# meaningful).
+#
+# The packages are one pnpm workspace: one install at the root, built in
+# dependency order, published with pnpm.
 
 on:
   push:
@@ -27,8 +32,11 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      CI: "true"
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -36,28 +44,18 @@ jobs:
           scope: "@pyxis-llm"
 
       # Build every package BEFORE anything is published, against the local
-      # file: links (so nothing is fetched from the registry mid-release). A
-      # build failure here stops the run with nothing on npm.
-      - name: Install @pyxis-llm/client deps
-        working-directory: packages/client
-        run: npm install
+      # workspace links (so nothing is fetched from the registry mid-release).
+      # A build failure here stops the run with nothing on npm.
+      - name: Install the workspace
+        run: pnpm install --frozen-lockfile
       - name: Build @pyxis-llm/client
-        working-directory: packages/client
-        run: npm run build
-      - name: Install @pyxis-llm/core deps
-        working-directory: packages/core
-        run: npm install
+        run: pnpm --filter @pyxis-llm/client run build
       - name: Build @pyxis-llm/core
-        working-directory: packages/core
-        run: npm run build
-      - name: Install @pyxis-llm/react deps
-        working-directory: packages/react
-        run: npm install
+        run: pnpm --filter @pyxis-llm/core run build
       - name: Build @pyxis-llm/react
-        working-directory: packages/react
-        run: npm run build
+        run: pnpm --filter @pyxis-llm/react run build
 
-      # Rewrites every version (and the file: links between @pyxis-llm/*
+      # Rewrites every version (and the workspace: links between @pyxis-llm/*
       # packages) to the release version. Runs after the builds on purpose.
       - name: Set npm package versions
         env:
@@ -75,23 +73,22 @@ jobs:
           fi
           node scripts/set-npm-versions.mjs --tag "$version"
 
-      - name: "Refuse to publish a dev version or a file: link"
+      - name: "Refuse to publish a dev version or a local link"
         run: node scripts/check-npm-dev-version.mjs
 
+      # --no-git-checks: set-npm-versions just edited the package.json files,
+      # so the tree is (deliberately) not clean.
       - name: Publish @pyxis-llm/client
-        working-directory: packages/client
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: pnpm --filter @pyxis-llm/client publish --access public --no-git-checks
 
       - name: Publish @pyxis-llm/core
-        working-directory: packages/core
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: pnpm --filter @pyxis-llm/core publish --access public --no-git-checks
 
       - name: Publish @pyxis-llm/react
-        working-directory: packages/react
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: pnpm --filter @pyxis-llm/react publish --access public --no-git-checks

@@ -1,0 +1,6 @@
+{
+  "name": "pyxis-workspace",
+  "private": true,
+  "description": "The pnpm workspace root of pyxis's JavaScript packages (see pnpm-workspace.yaml).",
+  "packageManager": "pnpm@10.18.3"
+}

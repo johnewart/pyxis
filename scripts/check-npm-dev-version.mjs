@@ -35,7 +35,7 @@ for (const dir of ALL_PACKAGE_DIRS) {
 
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
     for (const [dep, spec] of Object.entries(pkg[field] ?? {})) {
-      if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && spec.startsWith('file:')) {
+      if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && (spec.startsWith('file:') || spec.startsWith('workspace:'))) {
         console.error(`${dir}/package.json: ${field}["${dep}"] is a local link (${spec}); it would publish uninstallable`);
         failed = true;
       }

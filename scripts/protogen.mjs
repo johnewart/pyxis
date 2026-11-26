@@ -60,13 +60,14 @@ for (const plugin of PLUGINS) run('go', ['install', plugin]);
 // keep compiling and quietly shadow the real definition.
 fs.rmSync(path.join(llmdDir, 'gen/llmv1/embedding.pb.go'), { force: true });
 
-// Prefer the protoc bundled with @protobuf-ts (no system protoc required).
-const bundledDir = path.join(
-  llmdDir,
-  'packages/client/node_modules/@protobuf-ts/protoc/installed'
-);
+// Prefer the protoc bundled with @protobuf-ts (no system protoc required):
+// hoisted to the pnpm workspace's root, or in the client's own node_modules.
+const bundledDir = [
+  path.join(llmdDir, 'node_modules/@protobuf-ts/protoc/installed'),
+  path.join(llmdDir, 'packages/client/node_modules/@protobuf-ts/protoc/installed'),
+].find((d) => fs.existsSync(d));
 let protoc = process.env.PROTOC || 'protoc';
-if (fs.existsSync(bundledDir)) {
+if (bundledDir) {
   const found = fs
     .readdirSync(bundledDir)
     .filter((d) => d.startsWith('protoc-'))

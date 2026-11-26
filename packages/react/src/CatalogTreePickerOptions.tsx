@@ -60,7 +60,29 @@ export type CatalogTreePickerOptionsProps = {
   layout?: 'columns' | 'flat';
 };
 
+const byName = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+
+/**
+ * Providers and their models in alphabetical order, unless `keepOrder`. This
+ * is the order the flat layout and search results render in, and the order
+ * keyboard navigation walks, so both go through here.
+ */
 function groupOptionsByProvider(
+  options: ChatModelOption[],
+  keepOrder = false
+): Array<{ providerId: string; providerName: string; options: ChatModelOption[] }> {
+  const groups = groupOptionsByProviderInOrder(options);
+  if (keepOrder) return groups;
+  return groups
+    .map((g) => ({
+      ...g,
+      options: [...g.options].sort((a, b) => byName(a.modelName || a.modelId, b.modelName || b.modelId)),
+    }))
+    .sort((a, b) => byName(a.providerName, b.providerName));
+}
+
+function groupOptionsByProviderInOrder(
   options: ChatModelOption[]
 ): Array<{ providerId: string; providerName: string; options: ChatModelOption[] }> {
   const groups: Array<{
@@ -330,12 +352,13 @@ function renderFlatProviderOptions(
 export function getFilteredFlatOptions(
   options: ChatModelOption[],
   rawQuery: string,
-  buildTree?: CatalogTreeBuilder
+  buildTree?: CatalogTreeBuilder,
+  keepOrder?: boolean
 ): ChatModelOption[] {
   const query = normalizeSearchQuery(rawQuery);
   if (!query) return [];
 
-  const providerGroups = groupOptionsByProvider(options);
+  const providerGroups = groupOptionsByProvider(options, keepOrder);
   const result: ChatModelOption[] = [];
 
   for (const group of providerGroups) {
@@ -389,8 +412,8 @@ const CatalogTreePickerOptionsComponent = ({
 }: CatalogTreePickerOptionsProps) => {
   const normalizedSearch = normalizeSearchQuery(searchQuery);
   const providerGroups = useMemo(
-    () => groupOptionsByProvider(options),
-    [options]
+    () => groupOptionsByProvider(options, keepOrder),
+    [options, keepOrder]
   );
 
   const browserData = useMemo(

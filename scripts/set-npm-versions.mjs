@@ -79,16 +79,16 @@ function setVersion(pkgDir, version) {
   const pkgPath = path.join(repoRoot, pkgDir, 'package.json');
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   pkg.version = version;
-  // For a real release, sibling @pyxis-llm/* packages linked with file:../x
-  // must point at the released version: npm publishes file: specs verbatim,
-  // which makes the package uninstallable from the registry. Dev runs keep
-  // the local links.
+  // For a real release, sibling @pyxis-llm/* packages linked with workspace:*
+  // (or an older file:../x) must point at the released version: a publisher
+  // that does not rewrite them publishes them verbatim, which makes the
+  // package uninstallable from the registry. Dev runs keep the local links.
   if (!isDevVersion(version)) {
     for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
       const deps = pkg[field];
       if (!deps) continue;
       for (const [dep, spec] of Object.entries(deps)) {
-        if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && spec.startsWith('file:')) {
+        if (dep.startsWith('@pyxis-llm/') && typeof spec === 'string' && (spec.startsWith('file:') || spec.startsWith('workspace:'))) {
           deps[dep] = version;
         }
       }

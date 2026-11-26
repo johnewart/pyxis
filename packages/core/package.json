@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.15.0",
-    "@pyxis-llm/client": "file:../client",
+    "@pyxis-llm/client": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

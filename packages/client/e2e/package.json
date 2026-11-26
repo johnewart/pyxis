@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "build:llmd": "node scripts/build-llmd.mjs",
-    "test": "npm run build:llmd && vitest run"
+    "test": "pnpm run build:llmd && vitest run"
   },
   "dependencies": {
-    "@pyxis-llm/client": "file:..",
-    "@pyxis-llm/core": "file:../../core"
+    "@pyxis-llm/client": "workspace:*",
+    "@pyxis-llm/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

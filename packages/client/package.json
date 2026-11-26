@@ -48,12 +48,12 @@
   ],
   "scripts": {
     "proto:gen": "node scripts/proto-gen.mjs",
-    "ensure-deps": "node -e \"try{require.resolve('@connectrpc/connect')}catch{require('child_process').execSync('npm install',{stdio:'inherit'})}\"",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build:ts": "npm run ensure-deps && node ../../scripts/build-dist.mjs",
-    "build": "npm run proto:gen && npm run build:ts",
+    "build:ts": "node ../../scripts/build-dist.mjs",
+    "build": "pnpm run proto:gen && pnpm run build:ts",
     "test": "vitest run"
   },
+  "packageManager": "pnpm@10.18.3",
   "engines": {
     "node": ">=18"
   },

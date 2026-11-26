@@ -6,13 +6,13 @@
   "type": "module",
   "scripts": {
     "build:llmd": "node scripts/build-llmd.mjs",
-    "test": "npm run build:llmd && vitest run",
+    "test": "pnpm run build:llmd && vitest run",
     "test:unit": "vitest run sessionEventsSubscription.test.tsx messageAddressing.test.tsx sessionSwitch.test.tsx chatMessageHooks.test.tsx chatSegments.test.tsx queueSend.test.tsx sendMode.test.tsx displayCards.test.ts charts.test.tsx displayCardPlacement.test.tsx llmdPlugins.test.tsx messageUsage.test.tsx remarkAlerts.test.tsx"
   },
   "dependencies": {
-    "@pyxis-llm/client": "file:../../client",
-    "@pyxis-llm/core": "file:../../core",
-    "@pyxis-llm/react": "file:..",
+    "@pyxis-llm/client": "workspace:*",
+    "@pyxis-llm/core": "workspace:*",
+    "@pyxis-llm/react": "workspace:*",
     "@mantine/core": "^7.15.0",
     "@mantine/hooks": "^7.15.0",
     "react": "^18.3.1",

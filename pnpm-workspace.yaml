@@ -1,0 +1,15 @@
+# pyxis's JavaScript packages: one pnpm workspace, one lockfile
+# (pnpm-lock.yaml here). The packages link to each other with workspace:*,
+# which pnpm publish replaces with the released version (and
+# scripts/set-npm-versions.mjs does too, before publishing).
+packages:
+  - packages/client
+  - packages/client/e2e
+  - packages/core
+  - packages/react
+  - packages/react/e2e
+
+# A flat node_modules at the pyxis root, as the per-package npm installs laid
+# out (a host app that links these packages resolves their dependencies from
+# here).
+nodeLinker: hoisted

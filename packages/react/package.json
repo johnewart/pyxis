@@ -46,7 +46,7 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "vendor": "node ../../scripts/vendor-shared-types.mjs packages/react",
-    "build": "npm run vendor && node ../../scripts/build-dist.mjs"
+    "build": "pnpm run vendor && node ../../scripts/build-dist.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -94,12 +94,12 @@
     }
   },
   "dependencies": {
-    "@pyxis-llm/core": "file:../core",
+    "@pyxis-llm/core": "workspace:*",
     "@tabler/icons-react": "^3.30.0",
     "turndown": "^7.2.0"
   },
   "devDependencies": {
-    "@pyxis-llm/client": "file:../client",
+    "@pyxis-llm/client": "workspace:*",
     "@mantine/core": "^7.15.0",
     "@mantine/hooks": "^7.15.0",
     "@mermaid-js/layout-elk": "^0.1.7",

@@ -44,11 +44,22 @@ fs.mkdirSync(genDir, { recursive: true });
 
 const pluginName =
   process.platform === 'win32' ? 'protoc-gen-es.cmd' : 'protoc-gen-es';
-const plugin = path.join(pkgRoot, 'node_modules', '.bin', pluginName);
 
-if (!fs.existsSync(plugin)) {
-  console.error(`[proto-gen] Missing protoc-gen-es plugin: ${plugin}`);
-  console.error('[proto-gen] Run npm install in llmd/packages/client first.');
+// node_modules/<rel> in this package or any folder above it, as Node resolves
+// a package: in the pnpm workspace, dependencies are hoisted to its root.
+function findInNodeModules(rel) {
+  for (let dir = pkgRoot; ; dir = path.dirname(dir)) {
+    const p = path.join(dir, 'node_modules', rel);
+    if (fs.existsSync(p)) return p;
+    if (path.dirname(dir) === dir) return undefined;
+  }
+}
+
+const plugin = findInNodeModules(path.join('.bin', pluginName));
+
+if (!plugin) {
+  console.error(`[proto-gen] Missing protoc-gen-es plugin (${pluginName}).`);
+  console.error('[proto-gen] Run pnpm install at the pyxis root first.');
   process.exit(1);
 }
 
@@ -80,24 +91,13 @@ function resolveProtocCommand() {
     return { command: process.env.PROTOC, prefixArgs: [] };
   }
 
-  const onPath = findOnPath(process.platform === 'win32' ? 'protoc.exe' : 'protoc');
-  if (onPath) {
-    return { command: onPath, prefixArgs: [] };
-  }
-
-  const bundled = path.join(
-    pkgRoot,
-    'node_modules',
-    '@protobuf-ts',
-    'protoc',
-    'protoc.js',
-  );
-  if (fs.existsSync(bundled)) {
+  const bundled = findInNodeModules(path.join('@protobuf-ts', 'protoc', 'protoc.js'));
+  if (bundled) {
     return { command: process.execPath, prefixArgs: [bundled] };
   }
 
   console.error('[proto-gen] Missing @protobuf-ts/protoc (bundled protoc).');
-  console.error('[proto-gen] Run npm install in llmd/packages/client first.');
+  console.error('[proto-gen] Run pnpm install at the pyxis root first.');
   console.error('[proto-gen] Or set PROTOC to a protoc binary on PATH.');
   process.exit(1);
 }
