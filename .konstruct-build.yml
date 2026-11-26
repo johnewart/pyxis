@@ -5,17 +5,25 @@ packages:
       build:
       - go:1.25.5
       - node:20.19.5
+      - pnpm:10.18.3
     build_targets:
     - name: dist
       commands:
-      - npm --prefix packages/client install
-      - npm --prefix packages/client run build
-      - npm --prefix packages/core install
-      - npm --prefix packages/core run build
-      - npm --prefix packages/react install
-      - npm --prefix packages/react run build
-      description: 'Build packages/{client,core,react}/dist for file: consumers (always
-        re-run: dist is git-ignored)'
+      - pnpm install --frozen-lockfile
+      - pnpm --filter @pyxis-llm/client run build
+      - pnpm --filter @pyxis-llm/core run build
+      - pnpm --filter @pyxis-llm/react run build
+      environment:
+        CI: "true"
+      description: 'Build packages/{client,core,react}/dist, in dependency order, for
+        apps that link them (always re-run: dist is git-ignored)'
+    - name: lock
+      commands:
+      - pnpm install --lockfile-only --no-frozen-lockfile
+      environment:
+        CI: "true"
+      description: 'Bring the pnpm workspace''s pnpm-lock.yaml in line with every package.json
+        in it (lockfile only, no node_modules): run after changing a dependency'
     - name: dev
       commands:
       - go build -o ./llmd ./cmd/llmd && overmind s
@@ -77,31 +85,39 @@ packages:
       description: Install the pre-commit hook that runs npm-check-versions
     - name: client-test
       commands:
-      - npm --prefix packages/client install
-      - npm --prefix packages/client test
+      - pnpm install --frozen-lockfile
+      - pnpm --filter @pyxis-llm/client test
+      environment:
+        CI: "true"
       description: Run the @pyxis-llm/client vitest unit tests
     - name: react-test
       commands:
-      - npm --prefix packages/react/e2e install
-      - npm --prefix packages/react/e2e test
+      - pnpm install --frozen-lockfile
+      - pnpm --filter @pyxis-llm/react-e2e test
+      environment:
+        CI: "true"
       require_targets:
       - dist
       description: 'Run the @pyxis-llm/react vitest suite (packages/react/e2e: jsdom
         component tests + real-llmd tests)'
     - name: client-typecheck
       commands:
-      - npm install
-      - npx tsc -p tsconfig.json --noEmit
+      - pnpm install --frozen-lockfile
+      - pnpm exec tsc -p tsconfig.json --noEmit
+      environment:
+        CI: "true"
       root: packages/client
       description: Type-check @pyxis-llm/client with tsc --noEmit
     - name: react-unit-test
       commands:
-      - npm --prefix packages/react/e2e install
-      - npm --prefix packages/react/e2e run test:unit
+      - pnpm install --frozen-lockfile
+      - pnpm --filter @pyxis-llm/react-e2e run test:unit
+      environment:
+        CI: "true"
+      require_targets:
+      - dist
       description: 'Run @pyxis-llm/react''s unit suite (packages/react/e2e test:unit:
-        charts, display cards, plugins, chat driver). Tests the built dist/: build
-        packages/{client,core,react} first (konstruct''s konstruct-app:llmd-packages
-        does it)'
+        charts, display cards, plugins, chat driver), against the built dist/'
     - name: test-pkg
       commands:
       - go test {{pkg+}}
@@ -112,7 +128,10 @@ packages:
       description: Go unit tests for one or more package patterns (default all)
     - name: ts-test
       commands:
-      - npm test --prefix {{dir}}
+      - pnpm install --frozen-lockfile
+      - pnpm --dir {{dir}} test
+      environment:
+        CI: "true"
       description: Run vitest for one TypeScript package directory
     - name: proto-go
       commands:
@@ -120,10 +139,11 @@ packages:
       description: Regenerate Go protobuf/gRPC code in gen/ from proto/ (make generate)
     - name: proto-ts
       commands:
-      - npm --prefix packages/client install
-      - npm --prefix packages/client run proto:gen
-      description: Regenerate @pyxis-llm/client TypeScript protobuf code (npm run
-        proto:gen)
+      - pnpm install --frozen-lockfile
+      - pnpm --filter @pyxis-llm/client run proto:gen
+      environment:
+        CI: "true"
+      description: Regenerate @pyxis-llm/client TypeScript protobuf code (proto:gen)
     - name: build-modules
       commands:
       - go build -C cmd/llmd -o /dev/null .
