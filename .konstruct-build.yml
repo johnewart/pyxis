@@ -179,14 +179,10 @@ pipelines:
     steps:
     - pyxisd:dist
   test:
-    description: The Go packages a change touched, and the client's unit tests
+    description: Every Go test and the client's unit tests, run at the end of each story
     steps:
-    - target: pyxisd:test-go
-      args:
-        pkg: '{{packages}}'
-      match: '*.go'
-    - target: pyxisd:client-test
-      match: 'packages/client/**'
+    - pyxisd:test-go
+    - pyxisd:client-test
   merge:
     description: Everything, before work is merged
     steps:
