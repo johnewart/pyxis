@@ -173,3 +173,23 @@ params:
     pattern: ^v\d+\.\d+\.\d+.*$
     description: Release tag, e.g. v1.2.3
     multi: false
+pipelines:
+  setup:
+    description: Build the @pyxis-llm packages' dist/, which apps that link them import
+    steps:
+    - pyxisd:dist
+  test:
+    description: The Go packages a change touched, and the client's unit tests
+    steps:
+    - target: pyxisd:test-go
+      args:
+        pkg: '{{packages}}'
+      match: '*.go'
+    - target: pyxisd:client-test
+      match: 'packages/client/**'
+  merge:
+    description: Everything, before work is merged
+    steps:
+    - pyxisd:test-go
+    - pyxisd:client-test
+    - pyxisd:build-modules
